@@ -1,0 +1,106 @@
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-deep);
+  color: var(--text-pure);
+  line-height: 1.6;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(64, 224, 208, 0.25);
+}
+
+/* 滚动条 —— 克制、低存在感 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.35);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.6);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+/* 极简标签按钮 */
+.btn-ghost {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--text-muted);
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  transition: all var(--dur-fast) var(--ease);
+}
+.btn-ghost:hover {
+  color: var(--text-pure);
+  border-color: rgba(245, 245, 245, 0.5);
+}
+
+.btn-primary {
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: #06251f;
+  background: var(--agent-clarifier);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.btn-primary:hover {
+  opacity: 0.85;
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 输入框 */
+.input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 245, 245, 0.06);
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  color: var(--text-pure);
+  font-family: inherit;
+  font-size: 14px;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--agent-clarifier);
+}
+
+/* 通用面板 */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: var(--radius);
+  backdrop-filter: blur(12px);
+}

@@ -1,0 +1,45 @@
+:root {
+  /* 主色调 —— 继承白皮书色彩系统 */
+  --bg-deep: #0b1426;
+  --bg-panel: rgba(11, 20, 38, 0.92);
+  --text-pure: #f5f5f5;
+  --text-muted: #808080;
+  --text-faint: rgba(245, 245, 245, 0.5);
+
+  /* 状态色 */
+  --u-depth-0: #4a4a4a;
+  --u-depth-1: #ffb347;
+  --u-depth-2: #e0f7fa;
+  --attention-dim: #333333;
+  --attention-bright: #ffffff;
+  --divergence-contract: #2f4f4f;
+  --divergence-expand: #7fffd4;
+  --fatigue: #d8bfd8;
+  --flow: #ffd700;
+
+  /* 代理色 */
+  --agent-clarifier: #40e0d0;
+  --agent-challenger: #ff6347;
+  --agent-connector: #9370db;
+  --agent-expander: #3cb371;
+
+  --gap-red: #cd5c5c;
+
+  /* 字体 */
+  --font-sans: "Inter", "PingFang SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+
+  /* 布局 */
+  --ring-width: 64px;
+  --agent-height: 320px;
+  --drawer-width: 380px;
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  /* 动效 */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 300ms;
+  --dur-mid: 400ms;
+  --dur-slow: 500ms;
+  --breath-1: 4s;
+  --breath-2: 6s;
+}

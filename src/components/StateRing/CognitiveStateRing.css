@@ -1,0 +1,114 @@
+.ring-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 6px;
+  width: var(--ring-width);
+  background: rgba(11, 20, 38, 0.6);
+  border-right: 1px solid rgba(128, 128, 128, 0.15);
+  flex-shrink: 0;
+}
+
+.state-ring {
+  overflow: visible;
+  animation: ringBreath var(--breath-1) ease-in-out infinite;
+}
+
+.ring-track {
+  fill: none;
+  stroke: rgba(128, 128, 128, 0.18);
+  stroke-width: 3;
+}
+
+.ring-arc {
+  fill: none;
+  stroke-linecap: round;
+  transform: rotate(-90 50 50);
+  transition:
+    stroke-dashoffset var(--dur-mid) var(--ease),
+    stroke var(--dur-mid) var(--ease),
+    opacity var(--dur-mid) var(--ease);
+}
+
+.ring-arc.attention {
+  transform: none;
+}
+
+.ring-arc.fatigue {
+  transform: none;
+}
+
+.flow-core {
+  transform-origin: 50px 50px;
+  transition: opacity var(--dur-slow) var(--ease);
+  opacity: 0.12;
+}
+
+.ring-shell.is-flow .flow-core {
+  opacity: 0.95;
+  animation: flowPulse 2.4s ease-in-out infinite;
+}
+
+.ring-shell.is-flow .state-ring {
+  animation: flowRotate 14s linear infinite;
+}
+
+.ring-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+  width: 100%;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.legend-item .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.flow-badge {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--flow);
+  border: 1px solid rgba(255, 215, 0, 0.4);
+  border-radius: 6px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+@keyframes ringBreath {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.94);
+  }
+}
+
+@keyframes flowPulse {
+  0%,
+  100% {
+    r: 6;
+  }
+  50% {
+    r: 10;
+  }
+}
+
+@keyframes flowRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
