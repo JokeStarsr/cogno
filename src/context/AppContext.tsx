@@ -4,6 +4,8 @@ import type { LLMConfig, ViewId } from '../types'
 
 export interface AppSettings {
   llm: LLMConfig
+  /** 轻量模型(澄清者/连接者用，更便宜) */
+  fastModel: string
   /** 眼动触发灵敏度 0.5-2，越高越敏感 */
   sensitivity: number
   /** 相机不可用时是否用鼠标代理 */
@@ -16,6 +18,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     apiKey: '',
     model: 'claude-sonnet-4-5-20250929',
   },
+  fastModel: 'claude-haiku-4-5-20251001',
   sensitivity: 1,
   mouseProxy: true,
 }

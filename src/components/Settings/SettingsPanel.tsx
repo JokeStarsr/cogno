@@ -11,6 +11,7 @@ export function SettingsPanel() {
     baseUrl: settings.llm.baseUrl,
     apiKey: settings.llm.apiKey,
     model: settings.llm.model,
+    fastModel: settings.fastModel,
     sensitivity: settings.sensitivity,
     mouseProxy: settings.mouseProxy,
   })
@@ -18,6 +19,7 @@ export function SettingsPanel() {
   const save = async () => {
     await updateSettings({
       llm: { baseUrl: form.baseUrl, apiKey: form.apiKey, model: form.model },
+      fastModel: form.fastModel,
       sensitivity: form.sensitivity,
       mouseProxy: form.mouseProxy,
     })
@@ -71,6 +73,16 @@ export function SettingsPanel() {
             placeholder="claude-sonnet-4-5-20250929"
           />
         </div>
+        <div className="set-row">
+          <label>轻量模型</label>
+          <input
+            className="input"
+            value={form.fastModel}
+            onChange={(e) => setForm({ ...form, fastModel: e.target.value })}
+            placeholder="claude-haiku-4-5-20251001"
+          />
+        </div>
+        <p className="set-note">澄清者/连接者走轻量模型（成本更低），挑战者/拓展者走上方主模型。</p>
         <div className={`set-status ${configured ? 'ok' : 'warn'}`}>
           {configured ? '✓ AI 已配置，代理可用' : '⚠ 尚未配置完整，代理对话不可用'}
         </div>

@@ -15,8 +15,14 @@ import { CalibrationOverlay } from './CalibrationOverlay'
 import { AgentPanel, type AgentTurn } from '../AgentPanel/AgentPanel'
 import { KnowledgeDrawer } from '../KnowledgeGrid/KnowledgeDrawer'
 import { ReviewOverlay } from './ReviewOverlay'
-import type { AgentId, CognitiveState, Mastery } from '../../types'
+import type { AgentId, ChatMessage, CognitiveState, Mastery } from '../../types'
 import './ReaderPage.css'
+
+/** 简单问答缓存：同代理 + 同问题命中直接返回，减少 API 调用 */
+const agentCache = new Map<string, string>()
+const CACHE_MAX = 200
+/** 澄清者/连接者使用轻量模型(更便宜)，挑战者/拓展者用主模型 */
+const FAST_AGENTS: AgentId[] = ['clarifier', 'connector']
 
 const DEFAULT_STATE: CognitiveState = {
   understanding: 45,
@@ -38,9 +44,16 @@ export function ReaderPage() {
   const [agentOpen, setAgentOpen] = useState(false)
   const [activeAgent, setActiveAgent] = useState<AgentId>('clarifier')
   const [turns, setTurns] = useState<AgentTurn[]>([])
+  const turnsRef = useRef<AgentTurn[]>([])
+  useEffect(() => {
+    turnsRef.current = turns
+  }, [turns])
   const [agentLoading, setAgentLoading] = useState(false)
   const [mastery, setMastery] = useState<Map<string, Mastery>>(new Map())
   const [lastReason, setLastReason] = useState<string | undefined>()
+  const [nudge, setNudge] = useState<string | null>(null)
+  const nudgeRef = useRef<string | null>(null)
+  const lastNudgeAt = useRef(0)
 
   const engineRef = useRef(new CognitiveEngine())
   const triggerRef = useRef(new AgentTrigger())
@@ -108,6 +121,21 @@ export function ReaderPage() {
     return unsub
   }, [])
 
+  // ── 页面行为：标签切换 / 失焦 = 走神信号 ──
+  useEffect(() => {
+    const onVis = () => engineRef.current.setPageVisible(!document.hidden)
+    const onFocus = () => engineRef.current.setPageVisible(true)
+    const onBlur = () => engineRef.current.setPageVisible(false)
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
   const runTriggerCheck = () => {
     const cfg = settingsRef.current.llm
     const stats = engineRef.current.getStats()
@@ -121,6 +149,18 @@ export function ReaderPage() {
       masteredLabels,
     })
     newConceptRef.current = null
+    // 主动提问气泡：在内容上停留较久(≥60s)且非心流 → 温和提问
+    if (
+      !nudgeRef.current &&
+      !stateRef.current.flow &&
+      stats.maxDwellMs >= 60_000 &&
+      Date.now() - lastNudgeAt.current > 2 * 60_000
+    ) {
+      lastNudgeAt.current = Date.now()
+      const text = '感觉你在某段内容上停留了一会儿 —— 这段讲的是什么?能用你自己的话复述一下吗?'
+      nudgeRef.current = text
+      setNudge(text)
+    }
     if (interv) {
       setLastReason(interv.reason)
       setActiveAgent(interv.agentId)
@@ -153,6 +193,21 @@ export function ReaderPage() {
     await doAgentCall(agentId, prompt, reason)
   }
 
+  const dismissNudge = () => {
+    nudgeRef.current = null
+    setNudge(null)
+  }
+
+  const onConfused = () => {
+    const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
+    void autoIntervene('clarifier', ctx, '你主动标记了困惑', settingsRef.current.llm)
+  }
+
+  const onImportant = () => {
+    const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
+    void autoIntervene('connector', ctx, '你主动标记了重要内容', settingsRef.current.llm)
+  }
+
   const doAgentCall = async (agentId: AgentId, userText: string, reason?: string) => {
     const cfg = settingsRef.current.llm
     setTurns((t) => [...t, { agentId, role: 'user', content: userText, ts: Date.now() }])
@@ -168,14 +223,33 @@ export function ReaderPage() {
       ])
       return
     }
+    // 常见问答缓存：同代理 + 同问题直接复用，避免重复计费
+    const cacheKey = `${agentId}:${userText.trim()}`
+    const cached = agentCache.get(cacheKey)
+    if (cached) {
+      setTurns((t) => [...t, { agentId, role: 'agent', content: cached, reason, ts: Date.now() }])
+      return
+    }
     setAgentLoading(true)
     try {
+      // 多轮上下文：携带该代理此前的对话历史（最近 8 条），实现苏格拉底式连续追问
+      const history: ChatMessage[] = turnsRef.current
+        .filter((t) => t.agentId === agentId)
+        .slice(-8)
+        .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as ChatMessage['role'], content: t.content }))
+      // 分档模型：澄清者/连接者走轻量模型省成本
+      const model = FAST_AGENTS.includes(agentId) ? settingsRef.current.fastModel : cfg.model
       const text = await chatCompletion(
-        cfg,
+        { ...cfg, model },
         AGENTS[agentId].systemPrompt,
-        [{ role: 'user', content: userText }],
+        [...history, { role: 'user', content: userText }],
         { maxTokens: 500 }
       )
+      if (agentCache.size >= CACHE_MAX) {
+        const firstKey = agentCache.keys().next().value
+        if (firstKey !== undefined) agentCache.delete(firstKey)
+      }
+      agentCache.set(cacheKey, text)
       setTurns((t) => [...t, { agentId, role: 'agent', content: text, reason, ts: Date.now() }])
     } catch (e) {
       setTurns((t) => [
@@ -312,12 +386,42 @@ export function ReaderPage() {
             <div className="reader-body">
               {source ? (
                 source.sourceType === 'pdf' && source.file ? null : (
-                  <TextViewer
-                    ref={textHandle}
-                    text={source.text ?? ''}
-                    onScroll={(d) => engineRef.current.pushScroll(d)}
-                    onConceptSeen={handleConceptSeen}
-                  />
+                  <>
+                    <TextViewer
+                      ref={textHandle}
+                      text={source.text ?? ''}
+                      onScroll={(d) => engineRef.current.pushScroll(d)}
+                      onConceptSeen={handleConceptSeen}
+                    />
+                    <div className="reader-feedback">
+                      <button className="feedback-btn confused" onClick={onConfused}>
+                        我困惑了
+                      </button>
+                      <button className="feedback-btn important" onClick={onImportant}>
+                        这里很重要
+                      </button>
+                    </div>
+                    {nudge && (
+                      <div className="reader-nudge">
+                        <p>{nudge}</p>
+                        <div className="nudge-actions">
+                          <button
+                            className="btn-primary"
+                            onClick={() => {
+                              const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
+                              dismissNudge()
+                              void autoIntervene('clarifier', ctx, '系统主动提问：在内容上停留较久', settingsRef.current.llm)
+                            }}
+                          >
+                            聊聊
+                          </button>
+                          <button className="btn-ghost" onClick={dismissNudge}>
+                            忽略
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )
               ) : (
                 <div className="reader-empty" onClick={() => setShowImport(true)}>
