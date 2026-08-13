@@ -42,8 +42,9 @@ export function SettingsPanel() {
       <section className="set-section panel">
         <h2>AI 代理配置（sub2api / 任意 Anthropic 兼容端点）</h2>
         <p className="set-note">
-          四个苏格拉底代理通过这里配置的端点调用。可填本地 <code>http://localhost:8180</code>，或服务器
-          <code>http://115.159.221.62:8180</code>，配合你的 claude-code key。key 仅保存在本机浏览器。
+          四个苏格拉底代理通过这里配置的端点调用，配合你的 claude-code key，key 仅保存在本机浏览器。
+          本机调试填 <code>http://localhost:8180</code>；<b>手机/远程设备请用服务器代理</b>{' '}
+          <code>http://115.159.221.62:8090/ai</code>（同源转发，手机可直接访问）。
         </p>
         <div className="set-row">
           <label>Base URL</label>
@@ -53,6 +54,18 @@ export function SettingsPanel() {
             onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
             placeholder="http://localhost:8180"
           />
+          <button
+            className="btn-ghost"
+            onClick={() => setForm({ ...form, baseUrl: 'http://localhost:8180' })}
+          >
+            本地
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => setForm({ ...form, baseUrl: 'http://115.159.221.62:8090/ai' })}
+          >
+            服务器代理
+          </button>
         </div>
         <div className="set-row">
           <label>API Key</label>
