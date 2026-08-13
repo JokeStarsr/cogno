@@ -23,7 +23,8 @@ export async function chatCompletion(
 
   const body: Record<string, unknown> = {
     model: cfg.model || 'claude-sonnet-4-5-20250929',
-    max_tokens: opts.maxTokens ?? 700,
+    // 思考型模型会把输出额度先花在 thinking 上，500 很容易被吃光导致正文为空
+    max_tokens: opts.maxTokens ?? 1024,
     system,
     messages,
   }
@@ -60,8 +61,16 @@ export async function chatCompletion(
     .filter((b) => typeof b === 'object' && b !== null && (b as { type?: string }).type === 'text')
     .map((b) => (b as { text?: string }).text ?? '')
     .join('')
-  if (!text) throw new Error('AI 返回为空')
-  return text
+    .trim()
+  // 思考模型的 thinking 占满 max_tokens 时 text 可能为空 → 用思考内容兜底，避免对话中断
+  const thinking = content
+    .filter((b) => typeof b === 'object' && b !== null && (b as { type?: string }).type === 'thinking')
+    .map((b) => (b as { thinking?: string }).thinking ?? '')
+    .join('')
+    .trim()
+  const final = text || thinking
+  if (!final) throw new Error('AI 返回为空')
+  return final
 }
 
 /** 简单检测配置是否有效 */

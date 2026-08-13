@@ -243,7 +243,7 @@ export function ReaderPage() {
         { ...cfg, model },
         AGENTS[agentId].systemPrompt,
         [...history, { role: 'user', content: userText }],
-        { maxTokens: 500 }
+        { maxTokens: 1024 }
       )
       if (agentCache.size >= CACHE_MAX) {
         const firstKey = agentCache.keys().next().value
