@@ -8,6 +8,11 @@ import { db, appendCognitiveLog, saveDoc, getDoc } from '../../lib/storage'
 import { getReviewItem } from '../../lib/spacedRepetition'
 import { getConcept } from '../../lib/knowledge'
 import { scanConceptsInText } from '../../lib/concepts'
+import {
+  ReadingEventTracker,
+  loadBaselineRate,
+  recordBaseline,
+} from '../../lib/readingSignals'
 import { CognitiveStateRing } from '../StateRing/CognitiveStateRing'
 import { TextViewer, type TextHandle } from './TextViewer'
 import { PdfViewer, type PdfHandle } from './PdfViewer'
@@ -58,6 +63,9 @@ export function ReaderPage() {
 
   const engineRef = useRef(new CognitiveEngine())
   const triggerRef = useRef(new AgentTrigger())
+  const signalRef = useRef(new ReadingEventTracker())
+  /** 个人翻页速率基线（页/分）；null = 样本不足 */
+  const baselineRef = useRef<number | null>(null)
   const controllerRef = useRef<TrackingController | null>(null)
   const textHandle = useRef<TextHandle>(null)
   const pdfHandle = useRef<PdfHandle>(null)
@@ -93,6 +101,8 @@ export function ReaderPage() {
       stateRef.current = st
       setState(st)
       appendCognitiveLog({ ...st, ts: Date.now() }).catch(() => {})
+      // 页信号层推进：可见时才累计停留
+      signalRef.current.tick()
       // 每 10 次循环做一次触发检查（约 20s 一次）
       sessionCount.current++
       if (sessionCount.current % 3 === 0) runTriggerCheck()
@@ -102,6 +112,8 @@ export function ReaderPage() {
       if (el) {
         const r = el.getBoundingClientRect()
         engineRef.current.setReadingBounds({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })
+        // 文本模式虚拟页检测（PDF 模式走 onPageChange）
+        signalRef.current.setTextScroll(el.scrollTop, el.clientHeight)
       }
     }, 3000)
     return () => {
@@ -127,9 +139,13 @@ export function ReaderPage() {
 
   // ── 页面行为：标签切换 / 失焦 = 走神信号 ──
   useEffect(() => {
-    const onVis = () => engineRef.current.setPageVisible(!document.hidden)
-    const onFocus = () => engineRef.current.setPageVisible(true)
-    const onBlur = () => engineRef.current.setPageVisible(false)
+    const syncVis = (v: boolean) => {
+      engineRef.current.setPageVisible(v)
+      signalRef.current.setPageVisible(v)
+    }
+    const onVis = () => syncVis(!document.hidden)
+    const onFocus = () => syncVis(true)
+    const onBlur = () => syncVis(false)
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
@@ -143,14 +159,19 @@ export function ReaderPage() {
   const runTriggerCheck = () => {
     const cfg = settingsRef.current.llm
     const trig = settingsRef.current.triggers
-    const stats = engineRef.current.getStats()
+    const sig = signalRef.current
+    // 页面不可见(切标签/失焦)：不自动介入也不弹气泡，避免离开时攒下一堆打扰
+    if (document.hidden) return
+    const calm = sig.isCalm(trig.calmSec)
     const masteredLabels = [...mastery].filter(([, m]) => m >= 2).map(([id]) => safeLabel(id))
     const interv = triggerRef.current.evaluate(
       {
         state: stateRef.current,
-        rereadCount: stats.rereadCount,
-        scrollPx: stats.scrollPx,
-        maxDwellMs: stats.maxDwellMs,
+        pageDwellSec: sig.pageDwellSec(),
+        pageRereads: sig.pageRereads(),
+        pageRatePerMin: sig.pageRatePerMin(trig.challengerWindowMin * 60_000),
+        baselineRate: baselineRef.current,
+        isCalm: calm,
         newConceptId: newConceptRef.current ?? undefined,
         masteredLabels,
       },
@@ -158,11 +179,12 @@ export function ReaderPage() {
       settingsRef.current.sensitivity
     )
     newConceptRef.current = null
-    // 主动提问气泡：在内容上停留超过配置时长且非心流 → 温和提问
+    // 主动提问气泡：当前页停留超过配置时长、已过冷静期且非心流 → 温和提问
     if (
       !nudgeRef.current &&
       !stateRef.current.flow &&
-      stats.maxDwellMs >= trig.nudgeDwellSec * 1000 &&
+      calm &&
+      sig.pageDwellSec() >= trig.nudgeDwellSec &&
       Date.now() - lastNudgeAt.current > trig.nudgeCooldownSec * 1000
     ) {
       lastNudgeAt.current = Date.now()
@@ -294,6 +316,12 @@ export function ReaderPage() {
     })
   }, [])
 
+  /** 统一滚动上报：认知状态 + 页信号层（后者只用于刷新冷静期） */
+  const handleScrollDelta = useCallback((d: number) => {
+    engineRef.current.pushScroll(d)
+    signalRef.current.reportScroll()
+  }, [])
+
   /** PDF 逐页文本抽取完成：缓存给代理取上下文，并扫描首页概念 */
   const handlePdfText = useCallback(
     (pages: string[]) => {
@@ -303,9 +331,10 @@ export function ReaderPage() {
     [handleConceptSeen]
   )
 
-  /** PDF 滚动跨页：扫描当前页概念，让连接者也能在 PDF 中触发 */
+  /** PDF 滚动跨页：页信号 + 扫描当前页概念，让连接者也能在 PDF 中触发 */
   const handlePdfPage = useCallback(
     (idx: number) => {
+      signalRef.current.reportPage(idx)
       const t = pdfTextsRef.current[idx]
       if (t && t.length) scanConceptsInText(t, (id) => handleConceptSeen(id), pdfSeenRef.current)
     },
@@ -337,6 +366,8 @@ export function ReaderPage() {
     setShowImport(false)
     sessionStart.current = Date.now()
     triggerRef.current.reset()
+    signalRef.current.reset()
+    baselineRef.current = loadBaselineRate()
     pdfSeenRef.current = new Set()
     void db.sessions.add({
       title: src.title,
@@ -377,6 +408,9 @@ export function ReaderPage() {
   const saveSession = useCallback(async () => {
     if (!source || sessionIdRef.current == null) return
     const dur = Math.round((Date.now() - sessionStart.current) / 1000)
+    // 会话速率样本 → 个人基线（挑战者离群检测依据）
+    const minutes = dur / 60
+    recordBaseline(source.title, signalRef.current.totalPagesTurned() / minutes, dur)
     await db.sessions.update(sessionIdRef.current, {
       durationSec: dur,
       conceptsTouched: [...mastery.keys()],
@@ -440,7 +474,7 @@ export function ReaderPage() {
           <PdfViewer
             ref={pdfHandle}
             file={source.file}
-            onScroll={(d) => engineRef.current.pushScroll(d)}
+            onScroll={handleScrollDelta}
             onTextReady={handlePdfText}
             onPageChange={handlePdfPage}
           />
@@ -487,7 +521,7 @@ export function ReaderPage() {
                     <TextViewer
                       ref={textHandle}
                       text={source.text ?? ''}
-                      onScroll={(d) => engineRef.current.pushScroll(d)}
+                      onScroll={handleScrollDelta}
                       onConceptSeen={handleConceptSeen}
                     />
                     <div className="reader-feedback">

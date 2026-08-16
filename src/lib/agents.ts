@@ -76,41 +76,34 @@ export const AGENT_LIST: AgentId[] = ['clarifier', 'challenger', 'connector', 'e
 
 export interface TriggerInput {
   state: CognitiveState
-  /** 最近5分钟回读次数 */
-  rereadCount: number
-  /** 最近5分钟滚动距离（px） */
-  scrollPx: number
-  /** 停留最长时长（ms） */
-  maxDwellMs: number
+  /** 当前页已停留秒数（仅统计页面可见时段） */
+  pageDwellSec: number
+  /** 当前页回读次数（离开后再次进入） */
+  pageRereads: number
+  /** 近期翻页速率（页/分钟，窗口 periodSec） */
+  pageRatePerMin: number
+  /** 个人阅读基线（页/分）；null = 样本不足 */
+  baselineRate: number | null
+  /** 是否已过冷静期：最近一次翻页/滚动在 calmSec 之前 */
+  isCalm: boolean
   /** 阅读中遇到的未掌握概念 id */
   newConceptId?: string
   masteredLabels: string[]
 }
 
-/** 触发阈值默认值：读出真实含义并在设置页暴露调整 */
+/** 触发阈值默认值：按页语义，见 types.AgentTriggerConfig 字段注释 */
 export const DEFAULT_TRIGGER_CONFIG: AgentTriggerConfig = {
   enabled: { clarifier: true, challenger: true, connector: true, expander: true },
   cooldownSec: 360,
-  clarifyUnderstand: 35,
-  clarifyReread: 6,
-  challengeScrollPx: 6000,
-  expanderUnderstand: 70,
-  expanderDwellSec: 120,
+  calmSec: 90,
+  clarifyDwellSec: 90,
+  clarifyPageReread: 2,
+  challengerRateMult: 2,
+  challengerFallbackRate: 6,
+  challengerWindowMin: 3,
+  expanderDwellSec: 180,
   nudgeDwellSec: 150,
   nudgeCooldownSec: 360,
-}
-
-/** v2 之前的旧默认值：识别「从未自定义过触发参数」的老存档并自动升级 */
-export const LEGACY_TRIGGER_CONFIG: AgentTriggerConfig = {
-  enabled: { clarifier: true, challenger: true, connector: true, expander: true },
-  cooldownSec: 180,
-  clarifyUnderstand: 45,
-  clarifyReread: 3,
-  challengeScrollPx: 1800,
-  expanderUnderstand: 70,
-  expanderDwellSec: 120,
-  nudgeDwellSec: 60,
-  nudgeCooldownSec: 120,
 }
 
 /** 自动介入冷却：同一代理在 cooldownSec 内不重复触发 */
@@ -122,16 +115,15 @@ export class AgentTrigger {
   }
 
   /**
-   * 根据认知状态与阅读行为，决定是否让某个代理自动介入。
-   * sensitivity 为「触发灵敏度」乘数(0.5-2)：越高越容易触发。
-   * 所有阈值会除以 sensitivity 后再比较 —— 等价于让实测信号放大。
+   * 按页语义判定：不强信号(当前页停留/回读/超速翻页)不自动介入；
+   * 冷静期内的任何介入都被拦截。sensitivity 为乘数(0.5-2)：所有数值阈值除以它。
    */
   evaluate(
     input: TriggerInput,
     cfg: AgentTriggerConfig = DEFAULT_TRIGGER_CONFIG,
     sensitivity = 1
   ): AgentIntervention | null {
-    const { state, rereadCount, scrollPx, maxDwellMs, newConceptId } = input
+    const { state, pageDwellSec, pageRereads, pageRatePerMin, baselineRate, isCalm, newConceptId } = input
 
     // 心流：静默，绝不打扰（最高优先级）
     if (state.flow) return null
@@ -141,33 +133,34 @@ export class AgentTrigger {
     let agentId: AgentId | null = null
     let reason = ''
 
-    // 困惑 → 澄清者：低理解深度 + 反复回读 = 卡住了
-    if (state.understanding < cfg.clarifyUnderstand && rereadCount >= th(cfg.clarifyReread)) {
+    // 卡住 → 澄清者：同一页停留够久且反复回读这一页（或用户主动点「我困惑了」）
+    if (pageDwellSec >= th(cfg.clarifyDwellSec) && pageRereads >= th(cfg.clarifyPageReread)) {
       agentId = 'clarifier'
-      reason = `理解深度降到 ${Math.round(state.understanding)}，最近 5 分钟回读了 ${rereadCount} 次，像是卡在某个概念上了`
+      reason = `你在第 ${Math.round(pageDwellSec)} 秒里回看了这一页 ${pageRereads} 次，像是在某个概念上卡住了`
     }
-    // 浅层扫描 → 挑战者：快速滚动 + 少回读；已困惑时不打扰（避免连着被两个角色轰炸）
+    // 浅层扫描 → 挑战者：翻页速率远超个人基线(或保守下限)且最近这页没有回读
     else if (
-      state.understanding >= cfg.clarifyUnderstand &&
-      state.attention > 40 &&
-      scrollPx > th(cfg.challengeScrollPx) &&
-      rereadCount < 2
+      pageRatePerMin > th((baselineRate ?? cfg.challengerFallbackRate) * cfg.challengerRateMult) &&
+      pageRereads === 0
     ) {
       agentId = 'challenger'
-      reason = '滚动很快、很少回读，可能只是在表面扫描，没有真正消化'
+      const ref = baselineRate != null ? `你的惯常速率的 ${cfg.challengerRateMult} 倍` : cfg.challengerFallbackRate
+      reason = `最近 ${cfg.challengerWindowMin} 分钟翻页速率 ${pageRatePerMin.toFixed(1)} 页/分，超过${ref}且很少回读，可能只是在表面扫描`
     }
     // 新概念 → 连接者
     else if (newConceptId) {
       agentId = 'connector'
       reason = '遇到了新概念，帮你把它和已经掌握的知识连起来'
     }
-    // 深度理解 → 拓展者：长时间高理解
-    else if (state.understanding > cfg.expanderUnderstand && maxDwellMs > th(cfg.expanderDwellSec) * 1000) {
+    // 深度沉浸 → 拓展者：同一页停留很久且中途没有任何回读
+    else if (pageDwellSec >= th(cfg.expanderDwellSec) && pageRereads === 0) {
       agentId = 'expander'
-      reason = '已经在这个概念上深度沉浸一段时间了，可以看看更远的地方'
+      reason = `你已经在这一页沉浸了 ${Math.round(pageDwellSec)} 秒没有回看，可以看看更远的地方`
     }
 
     if (!agentId || !cfg.enabled[agentId]) return null
+    // 冷静期期间的强弱信号都不自动介入（手动按钮不受此限）
+    if (!isCalm) return null
 
     const last = this.lastAuto.get(agentId) ?? 0
     if (Date.now() - last < cfg.cooldownSec * 1000) return null

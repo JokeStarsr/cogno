@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { db, setSetting } from '../lib/storage'
-import { DEFAULT_TRIGGER_CONFIG, LEGACY_TRIGGER_CONFIG } from '../lib/agents'
-import type { AgentId, AgentTriggerConfig, LLMConfig, ViewId } from '../types'
+import { DEFAULT_TRIGGER_CONFIG } from '../lib/agents'
+import type { AgentTriggerConfig, LLMConfig, ViewId } from '../types'
 
 export interface AppSettings {
   llm: LLMConfig
@@ -50,17 +50,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ;(async () => {
       const saved = await db.settings.get('app')
       if (saved?.value && alive) {
-        let s = saved.value as Partial<AppSettings>
-        // 触发参数 v2 迁移：整个 triggers 仍等于旧默认值（从未自定义过）的老存档，
-        // 丢弃后由合并逻辑自然升级为新默认；自定义过任一值的存档不动
-        if (s.triggers && equalTriggers(s.triggers, LEGACY_TRIGGER_CONFIG)) {
-          s = { ...s, triggers: undefined }
-        }
+        const s = saved.value as Partial<AppSettings>
+        // 触发参数 v3 迁移：v2 老存档的数值字段语义已作废（滚动px/理解度→按页停留/回读/速率）。
+        // 数值等于 v2 默认值 → 视作从未自定义，整体升级新版；自定义过 → 保留角色开关、数值用新版默认
+        const migrated = migrateTriggers(s.triggers)
         setSettings({
           ...DEFAULT_SETTINGS,
           ...s,
           // 老版本存档没有 triggers 字段，逐层合并保证新字段有默认值
-          triggers: { ...DEFAULT_SETTINGS.triggers, ...(s.triggers ?? {}) },
+          triggers: { ...DEFAULT_SETTINGS.triggers, ...(migrated ?? {}) },
         })
       }
     })()
@@ -97,19 +95,25 @@ export function useApp(): AppContextValue {
   return ctx
 }
 
-/** 字段级比较，忽略对象键顺序差异 */
-function equalTriggers(a: AgentTriggerConfig, b: AgentTriggerConfig): boolean {
-  return (
-    a.cooldownSec === b.cooldownSec &&
-    a.clarifyUnderstand === b.clarifyUnderstand &&
-    a.clarifyReread === b.clarifyReread &&
-    a.challengeScrollPx === b.challengeScrollPx &&
-    a.expanderUnderstand === b.expanderUnderstand &&
-    a.expanderDwellSec === b.expanderDwellSec &&
-    a.nudgeDwellSec === b.nudgeDwellSec &&
-    a.nudgeCooldownSec === b.nudgeCooldownSec &&
-    ['clarifier', 'challenger', 'connector', 'expander'].every(
-      (k) => a.enabled[k as AgentId] === b.enabled[k as AgentId]
-    )
-  )
+/** v2(方案B) 各数值字段的默认值——只用于迁移判定 */
+const TRIGGER_V2_DEFAULTS: Record<string, number> = {
+  cooldownSec: 360,
+  clarifyUnderstand: 35,
+  clarifyReread: 6,
+  challengeScrollPx: 6000,
+  expanderUnderstand: 70,
+  expanderDwellSec: 120,
+  nudgeDwellSec: 150,
+  nudgeCooldownSec: 360,
+}
+
+function migrateTriggers(oldTrig: AgentTriggerConfig | undefined): Partial<AgentTriggerConfig> | undefined {
+  if (!oldTrig) return undefined
+  const untouched = Object.entries(TRIGGER_V2_DEFAULTS).every(([k, v]) => {
+    const val = oldTrig[k as keyof AgentTriggerConfig]
+    return val === undefined || val === v
+  })
+  if (untouched) return undefined
+  // 自定义过数值：v3 语义下旧数值作废，仅保留角色开关
+  return { enabled: oldTrig.enabled }
 }

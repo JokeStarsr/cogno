@@ -24,24 +24,10 @@ export class CognitiveEngine {
   private readingBounds: { left: number; right: number; top: number; bottom: number } | null = null
   /** 页面是否可见(切标签/失焦 = 走神信号) */
   private pageVisible = true
-  /** 5 分钟窗口的触发统计 */
+  /** 5 分钟窗口的触发统计（触发判定已按页语义重构，见 readingSignals.ts） */
   private regressions5m: number[] = []
   private scrollHistory: { px: number; ts: number }[] = []
   private lastScrollDelta = 0
-  private lastScrollTs = Date.now()
-  private dwellRunMs = 0
-  private maxDwellMs = 0
-
-  /** 供代理触发读取的近期阅读统计 */
-  getStats() {
-    const now = Date.now()
-    const fiveMin = now - 5 * 60_000
-    return {
-      rereadCount: this.regressions5m.filter((t) => t > fiveMin).length,
-      scrollPx: this.scrollHistory.filter((s) => s.ts > fiveMin).reduce((a, s) => a + s.px, 0),
-      maxDwellMs: this.maxDwellMs,
-    }
-  }
 
   setReadingBounds(b: { left: number; right: number; top: number; bottom: number } | null) {
     this.readingBounds = b
@@ -65,7 +51,6 @@ export class CognitiveEngine {
       this.regressions5m.push(Date.now())
     }
     this.lastScrollDelta = deltaPx
-    this.lastScrollTs = Date.now()
     const fiveMin = Date.now() - 5 * 60_000
     this.scrollHistory = this.scrollHistory.filter((s) => s.ts > fiveMin)
     this.regressions5m = this.regressions5m.filter((t) => t > fiveMin)
@@ -129,21 +114,6 @@ export class CognitiveEngine {
       const meanY = win.reduce((a, s) => a + s.y, 0) / n
       const varY = win.reduce((a, s) => a + (s.y - meanY) ** 2, 0) / n
       stable = clamp(100 - Math.sqrt(varY) * 1.6)
-    }
-
-    // ── 停留时长：注视持续在阅读区 或 长时间无滚动(滚动停留) ──
-    // 滚动停留让手机端(无注视)也能积累沉浸时长，驱动主动提问
-    if (this.pageVisible) {
-      const gazeActive = n >= 4 && inArea > 0.78
-      const scrollIdle = now - this.lastScrollTs > 25_000
-      if (gazeActive || scrollIdle) {
-        this.dwellRunMs += 2000
-        if (this.dwellRunMs > this.maxDwellMs) this.maxDwellMs = this.dwellRunMs
-      } else {
-        this.dwellRunMs = Math.max(0, this.dwellRunMs - 2000)
-      }
-    } else {
-      this.dwellRunMs = 0
     }
 
     // ── 理解深度 ──

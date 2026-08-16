@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { AGENTS } from '../../lib/agents'
+import { baselineStatus } from '../../lib/readingSignals'
 import { db } from '../../lib/storage'
 import { isLLMConfigured } from '../../lib/llm'
 import type { AgentId } from '../../types'
@@ -11,6 +12,7 @@ const AGENT_IDS: AgentId[] = ['clarifier', 'challenger', 'connector', 'expander'
 export function SettingsPanel() {
   const { settings, updateSettings } = useApp()
   const [saved, setSaved] = useState(false)
+  const [base, setBase] = useState(() => baselineStatus())
   const [form, setForm] = useState(() => ({
     baseUrl: settings.llm.baseUrl,
     apiKey: settings.llm.apiKey,
@@ -20,10 +22,12 @@ export function SettingsPanel() {
     mouseProxy: settings.mouseProxy,
     trigEnabled: { ...settings.triggers.enabled },
     trigCooldownMin: settings.triggers.cooldownSec / 60,
-    trigClarifyUnderstand: settings.triggers.clarifyUnderstand,
-    trigClarifyReread: settings.triggers.clarifyReread,
-    trigChallengeScroll: settings.triggers.challengeScrollPx,
-    trigExpanderUnderstand: settings.triggers.expanderUnderstand,
+    trigCalmSec: settings.triggers.calmSec,
+    trigClarifyDwellSec: settings.triggers.clarifyDwellSec,
+    trigClarifyPageReread: settings.triggers.clarifyPageReread,
+    trigChallengerMult: settings.triggers.challengerRateMult,
+    trigChallengerFallback: settings.triggers.challengerFallbackRate,
+    trigChallengerWindowMin: settings.triggers.challengerWindowMin,
     trigExpanderDwellSec: settings.triggers.expanderDwellSec,
     trigNudgeDwellSec: settings.triggers.nudgeDwellSec,
     trigNudgeCooldownMin: settings.triggers.nudgeCooldownSec / 60,
@@ -38,15 +42,18 @@ export function SettingsPanel() {
       triggers: {
         enabled: form.trigEnabled,
         cooldownSec: Math.round(form.trigCooldownMin * 60),
-        clarifyUnderstand: form.trigClarifyUnderstand,
-        clarifyReread: form.trigClarifyReread,
-        challengeScrollPx: form.trigChallengeScroll,
-        expanderUnderstand: form.trigExpanderUnderstand,
-        expanderDwellSec: form.trigExpanderDwellSec,
-        nudgeDwellSec: form.trigNudgeDwellSec,
+        calmSec: Math.round(form.trigCalmSec),
+        clarifyDwellSec: Math.round(form.trigClarifyDwellSec),
+        clarifyPageReread: Math.round(form.trigClarifyPageReread),
+        challengerRateMult: form.trigChallengerMult,
+        challengerFallbackRate: form.trigChallengerFallback,
+        challengerWindowMin: Math.round(form.trigChallengerWindowMin),
+        expanderDwellSec: Math.round(form.trigExpanderDwellSec),
+        nudgeDwellSec: Math.round(form.trigNudgeDwellSec),
         nudgeCooldownSec: Math.round(form.trigNudgeCooldownMin * 60),
       },
     })
+    setBase(baselineStatus())
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)
   }
@@ -163,52 +170,83 @@ export function SettingsPanel() {
           <span className="set-hint">分钟 · 同一角色两次自动介入的最小间隔</span>
         </div>
         <div className="set-row">
-          <label>澄清者</label>
-          <span className="set-hint">理解深度低于</span>
+          <label>冷静期</label>
           <input
             className="num"
             type="number"
             min="0"
-            max="100"
-            value={form.trigClarifyUnderstand}
-            onChange={(e) => setForm({ ...form, trigClarifyUnderstand: Number(e.target.value) })}
+            max="600"
+            step="10"
+            value={form.trigCalmSec}
+            onChange={(e) => setForm({ ...form, trigCalmSec: Number(e.target.value) })}
           />
-          <span className="set-hint">% 且 5 分钟回读 ≥</span>
+          <span className="set-hint">秒 · 最近一次翻页/滚动后不打扰（这就是你的思考时间）</span>
+        </div>
+        <div className="set-row">
+          <label>澄清者</label>
+          <span className="set-hint">同一页停留 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            step="10"
+            value={form.trigClarifyDwellSec}
+            onChange={(e) => setForm({ ...form, trigClarifyDwellSec: Number(e.target.value) })}
+          />
+          <span className="set-hint">秒 且该页回读 ≥</span>
           <input
             className="num"
             type="number"
             min="0"
             max="20"
-            value={form.trigClarifyReread}
-            onChange={(e) => setForm({ ...form, trigClarifyReread: Number(e.target.value) })}
+            value={form.trigClarifyPageReread}
+            onChange={(e) => setForm({ ...form, trigClarifyPageReread: Number(e.target.value) })}
           />
-          <span className="set-hint">次</span>
+          <span className="set-hint">次（或点「我困惑了」）</span>
         </div>
         <div className="set-row">
           <label>挑战者</label>
-          <span className="set-hint">5 分钟滚动 ≥</span>
+          <span className="set-hint">翻页速率超个人基线 ×</span>
+          <input
+            className="num"
+            type="number"
+            min="1"
+            max="10"
+            step="0.5"
+            value={form.trigChallengerMult}
+            onChange={(e) => setForm({ ...form, trigChallengerMult: Number(e.target.value) })}
+          />
+          <span className="set-hint">倍（无基线时 &gt; </span>
           <input
             className="num"
             type="number"
             min="0"
-            step="100"
-            value={form.trigChallengeScroll}
-            onChange={(e) => setForm({ ...form, trigChallengeScroll: Number(e.target.value) })}
+            step="0.5"
+            value={form.trigChallengerFallback}
+            onChange={(e) => setForm({ ...form, trigChallengerFallback: Number(e.target.value) })}
           />
-          <span className="set-hint">px 且回读少</span>
+          <span className="set-hint">页/分），窗口 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="1"
+            max="20"
+            value={form.trigChallengerWindowMin}
+            onChange={(e) => setForm({ ...form, trigChallengerWindowMin: Number(e.target.value) })}
+          />
+          <span className="set-hint">分钟且该页无回读</span>
+        </div>
+        <div className="set-row">
+          <label>个人基线</label>
+          <span className="set-hint">
+            {base.rate != null
+              ? `当前 ${base.rate.toFixed(2)} 页/分（${base.n} 篇样本，最近 3 篇取均值）`
+              : `尚未建立（需 ${2 - base.n} 篇 2 分钟以上样本，读满 3 篇自动启用）`}
+          </span>
         </div>
         <div className="set-row">
           <label>拓展者</label>
-          <span className="set-hint">理解深度高于</span>
-          <input
-            className="num"
-            type="number"
-            min="0"
-            max="100"
-            value={form.trigExpanderUnderstand}
-            onChange={(e) => setForm({ ...form, trigExpanderUnderstand: Number(e.target.value) })}
-          />
-          <span className="set-hint">% 且停留 ≥</span>
+          <span className="set-hint">同一页持续停留 ≥</span>
           <input
             className="num"
             type="number"
@@ -217,11 +255,11 @@ export function SettingsPanel() {
             value={form.trigExpanderDwellSec}
             onChange={(e) => setForm({ ...form, trigExpanderDwellSec: Number(e.target.value) })}
           />
-          <span className="set-hint">秒</span>
+          <span className="set-hint">秒且中途无回读</span>
         </div>
         <div className="set-row">
           <label>主动提问</label>
-          <span className="set-hint">内容上停留 ≥</span>
+          <span className="set-hint">当前页停留 ≥</span>
           <input
             className="num"
             type="number"

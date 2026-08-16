@@ -104,17 +104,21 @@ export interface AgentTriggerConfig {
   enabled: Record<AgentId, boolean>
   /** 同一代理两次自动介入的最小间隔（秒） */
   cooldownSec: number
-  /** 澄清者触发：理解深度低于此值 */
-  clarifyUnderstand: number
-  /** 澄清者触发：5 分钟回读次数 ≥ 此值 */
-  clarifyReread: number
-  /** 挑战者触发：5 分钟滚动距离 ≥ 此值（px） */
-  challengeScrollPx: number
-  /** 拓展者触发：理解深度高于此值 */
-  expanderUnderstand: number
-  /** 拓展者触发：持续停留 ≥ 此值（秒） */
+  /** 冷静期：最近翻页/滚动 N 秒内不自动介入（专用思考时间） */
+  calmSec: number
+  /** 澄清者触发：当前页停留 ≥ N 秒 */
+  clarifyDwellSec: number
+  /** 澄清者触发：且该页回读（离开后重进入）≥ N 次 */
+  clarifyPageReread: number
+  /** 挑战者触发：翻页速率(页/分)超过个人基线 ×N */
+  challengerRateMult: number
+  /** 挑战者触发：无个人基线(样本不足)时速率直接超过此值(页/分) */
+  challengerFallbackRate: number
+  /** 挑战者触发：速率统计窗口（分钟） */
+  challengerWindowMin: number
+  /** 拓展者触发：当前页停留 ≥ N 秒 且该页无回读 */
   expanderDwellSec: number
-  /** 主动提问气泡：内容停留 ≥ 此值（秒） */
+  /** 主动提问气泡：当前页停留 ≥ N 秒 */
   nudgeDwellSec: number
   /** 主动提问气泡最小间隔（秒） */
   nudgeCooldownSec: number
