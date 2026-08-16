@@ -161,9 +161,57 @@
   }
 }
 
+@media (max-width: 720px) {
+  .agent-panel {
+    left: 8px;
+    right: 8px;
+    bottom: 72px;
+    height: min(52vh, 420px);
+  }
+  .agent-tab {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
 .agent-input {
   display: flex;
   gap: 8px;
   padding: 8px 12px;
   border-top: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+/* 本地降级应答徽标 */
+.turn-local {
+  margin-left: 6px;
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 8px;
+  color: #ffd700;
+  border: 1px solid rgba(255, 215, 0, 0.4);
+}
+
+/* 轻量 markdown */
+.md-para {
+  margin: 0 0 6px;
+}
+.md-para:last-child {
+  margin-bottom: 0;
+}
+.md-il {
+  background: rgba(64, 224, 208, 0.12);
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 12px;
+}
+.md-code {
+  background: rgba(4, 8, 18, 0.7);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  margin-bottom: 6px;
+  white-space: pre;
 }

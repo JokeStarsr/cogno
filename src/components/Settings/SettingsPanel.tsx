@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext'
 import { AGENTS } from '../../lib/agents'
 import { baselineStatus } from '../../lib/readingSignals'
 import { db } from '../../lib/storage'
-import { isLLMConfigured } from '../../lib/llm'
+import { chatCompletion, friendlyFailure, isLLMConfigured, LLMError } from '../../lib/llm'
 import type { AgentId } from '../../types'
 import './SettingsPanel.css'
 
@@ -13,6 +13,8 @@ export function SettingsPanel() {
   const { settings, updateSettings } = useApp()
   const [saved, setSaved] = useState(false)
   const [base, setBase] = useState(() => baselineStatus())
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [form, setForm] = useState(() => ({
     baseUrl: settings.llm.baseUrl,
     apiKey: settings.llm.apiKey,
@@ -58,9 +60,40 @@ export function SettingsPanel() {
     setTimeout(() => setSaved(false), 1600)
   }
 
+  /** 最小成本连通性测试：空 system + 单条 ping，输出上限压到 8 token */
+  const testConnection = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      await chatCompletion(
+        { baseUrl: form.baseUrl, apiKey: form.apiKey, model: form.model },
+        '',
+        [{ role: 'user', content: 'ping' }],
+        { maxTokens: 8 }
+      )
+      setTestResult({ ok: true, msg: '连接正常，端点可用。' })
+    } catch (e) {
+      const err = e as Error
+      const kind = err instanceof LLMError ? err.kind : 'unknown'
+      setTestResult({ ok: false, msg: friendlyFailure(kind, err.message) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   const clearAll = async () => {
-    if (!confirm('将清空本地全部学习数据（概念掌握度、阅读记录、认知日志）。此操作不可恢复。')) return
-    await Promise.all([db.concepts.clear(), db.sessions.clear(), db.cognitiveLogs.clear()])
+    if (
+      !confirm(
+        '将清空本地全部学习数据（概念掌握度、阅读记录、认知日志、已保存文档）。此操作不可恢复。'
+      )
+    )
+      return
+    await Promise.all([
+      db.concepts.clear(),
+      db.sessions.clear(),
+      db.cognitiveLogs.clear(),
+      db.docs.clear(),
+    ])
     alert('已清空')
   }
 
@@ -128,8 +161,21 @@ export function SettingsPanel() {
         </div>
         <p className="set-note">澄清者/连接者走轻量模型（成本更低），挑战者/拓展者走上方主模型。</p>
         <div className={`set-status ${configured ? 'ok' : 'warn'}`}>
-          {configured ? '✓ AI 已配置，代理可用' : '⚠ 尚未配置完整，代理对话不可用'}
+          {configured ? '✓ AI 已配置，代理可用' : '⚠ 尚未配置完整，将使用本地苏格拉底问答'}
         </div>
+        <div className="set-row">
+          <label>端点测试</label>
+          <button className="btn-ghost" onClick={testConnection} disabled={testing}>
+            {testing ? '测试中…' : '测试连接'}
+          </button>
+          {testResult && (
+            <span className={`set-test ${testResult.ok ? 'ok' : 'err'}`}>{testResult.msg}</span>
+          )}
+        </div>
+        <p className="set-note">
+          测试只发一个最小请求（约 10 token），用来验证 Base URL / Key / 模型是否可用，并
+          及时识别"余额不足 / 无可用账户 / 限流"。
+        </p>
       </section>
 
       <section className="set-section panel">

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { AGENTS, AGENT_LIST } from '../../lib/agents'
 import type { AgentId } from '../../types'
 import './AgentPanel.css'
@@ -8,6 +8,8 @@ export interface AgentTurn {
   role: 'user' | 'agent'
   content: string
   reason?: string
+  /** 本地离线应答（AI 不可用/余额不足时的降级回答） */
+  local?: boolean
   ts: number
 }
 
@@ -22,7 +24,7 @@ interface Props {
   lastReason?: string
 }
 
-export function AgentPanel({
+export const AgentPanel = memo(function AgentPanel({
   activeAgent,
   onSelectAgent,
   turns,
@@ -82,10 +84,11 @@ export function AgentPanel({
               {t.role === 'agent' && (
                 <span className="turn-name" style={{ color: AGENTS[t.agentId].color }}>
                   {AGENTS[t.agentId].name}
+                  {t.local && <span className="turn-local">本地</span>}
                 </span>
               )}
               {t.role === 'user' && <span className="turn-name">你</span>}
-              <div className="turn-bubble">{t.content}</div>
+              <div className="turn-bubble">{t.role === 'agent' ? <Md text={t.content} /> : t.content}</div>
               {t.reason && <div className="turn-reason">{t.reason}</div>}
             </div>
           ))
@@ -114,4 +117,83 @@ export function AgentPanel({
       </div>
     </div>
   )
+})
+
+/** 轻量 markdown：代码块 / 粗体 / 行内代码 / 段落，无第三方依赖 */
+function Md({ text }: { text: string }) {
+  const blocks: React.ReactNode[] = []
+  const lines = text.split('\n')
+  let inCode = false
+  let codeBuf: string[] = []
+  let para: string[] = []
+  let key = 0
+
+  const flushPara = () => {
+    if (!para.length) return
+    blocks.push(
+      <p key={key++} className="md-para">
+        {para.map((l) => inlineMd(l))}
+      </p>
+    )
+    para = []
+  }
+
+  for (const line of lines) {
+    if (line.trim().startsWith('```')) {
+      flushPara()
+      if (inCode) {
+        blocks.push(
+          <pre key={key++} className="md-code">
+            {esc(codeBuf.join('\n'))}
+          </pre>
+        )
+        codeBuf = []
+        inCode = false
+      } else {
+        inCode = true
+      }
+      continue
+    }
+    if (inCode) {
+      codeBuf.push(line)
+      continue
+    }
+    if (line.trim() === '') {
+      flushPara()
+      continue
+    }
+    para.push(line)
+  }
+  flushPara()
+  if (inCode && codeBuf.length) {
+    blocks.push(
+      <pre key={key++} className="md-code">
+        {esc(codeBuf.join('\n'))}
+      </pre>
+    )
+  }
+
+  return <>{blocks}</>
+}
+
+function inlineMd(line: string): React.ReactNode {
+  const out: React.ReactNode[] = []
+  // ```inline code``` 与 **bold** 交替切分
+  const re = /(`[^`]+`|\*\*[^*]+\*\*)/g
+  let last = 0
+  let k = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(line))) {
+    if (m.index > last) out.push(line.slice(last, m.index))
+    const tk = m[0]
+    if (tk.startsWith('`')) out.push(<code key={k++} className="md-il">{esc(tk.slice(1, -1))}</code>)
+    else out.push(<strong key={k++}>{tk.slice(2, -2)}</strong>)
+    last = m.index + tk.length
+  }
+  if (last < line.length) out.push(line.slice(last))
+  return <>{out}</>
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

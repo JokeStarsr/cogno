@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import type { CognitiveState } from '../../types'
 import './CognitiveStateRing.css'
 
@@ -29,7 +29,7 @@ function hexToRgb(h: string): [number, number, number] {
 const R = 42
 const CIRC = 2 * Math.PI * R
 
-export function CognitiveStateRing({ state }: { state: CognitiveState }) {
+export const CognitiveStateRing = memo(function CognitiveStateRing({ state }: { state: CognitiveState }) {
   const uColor = useMemo(() => understandingColor(state.understanding), [state.understanding])
 
   return (
@@ -95,4 +95,4 @@ export function CognitiveStateRing({ state }: { state: CognitiveState }) {
       </div>
     </div>
   )
-}
+})

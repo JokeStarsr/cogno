@@ -11,6 +11,8 @@ const NAV: { id: ViewId; label: string }[] = [
   { id: 'settings', label: '设置' },
 ]
 
+/** 三页全部保持挂载，用 CSS 显隐切换：
+ *  阅读中途去设置/回概览，会话、AI 对话、滚动位置与眼动追踪都不中断 */
 export default function App() {
   const { view, setView } = useApp()
 
@@ -35,9 +37,15 @@ export default function App() {
         <div className="nav-spacer" />
       </nav>
       <main className="app-main">
-        {view === 'dashboard' && <Dashboard />}
-        {view === 'reader' && <ReaderPage />}
-        {view === 'settings' && <SettingsPanel />}
+        <div className={`page ${view === 'dashboard' ? 'page-active' : ''}`}>
+          <Dashboard />
+        </div>
+        <div className={`page ${view === 'reader' ? 'page-active' : ''}`}>
+          <ReaderPage />
+        </div>
+        <div className={`page ${view === 'settings' ? 'page-active' : ''}`}>
+          <SettingsPanel />
+        </div>
       </main>
     </div>
   )

@@ -101,6 +101,39 @@
   font-size: 14px;
 }
 
+/* 概念浮层（点击高亮概念弹出：描述 + 前置） */
+.concept-popup {
+  display: none;
+  position: fixed;
+  z-index: 90;
+  max-width: 340px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(11, 20, 38, 0.98);
+  border: 1px solid rgba(64, 224, 208, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-pure);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.concept-popup b {
+  color: var(--agent-clarifier);
+  font-size: 15px;
+  display: block;
+  margin-bottom: 4px;
+}
+.concept-popup p {
+  color: rgba(245, 245, 245, 0.85);
+  margin-bottom: 6px;
+}
+.concept-popup .concept-popup-prereq {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* 主动反馈按钮(金标准信号) */
 .reader-feedback {
   position: absolute;
@@ -329,6 +362,12 @@
   gap: 10px;
   margin-top: 16px;
 }
+.import-url-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--agent-challenger);
+  line-height: 1.6;
+}
 
 /* 校准 */
 .cal-overlay {
@@ -484,5 +523,23 @@
   }
   to {
     opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .text-viewer {
+    padding: 20px 18px;
+  }
+  .reader-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 8px 12px;
+  }
+  .reader-title-text {
+    max-width: 68vw;
+  }
+  .reader-feedback {
+    bottom: 12px;
   }
 }

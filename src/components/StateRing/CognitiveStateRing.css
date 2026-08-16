@@ -87,6 +87,29 @@
   text-align: center;
 }
 
+/* 小屏：状态环变为右下角悬浮小徽标（不挤压阅读区） */
+@media (max-width: 720px) {
+  .ring-shell {
+    position: fixed;
+    bottom: 14px;
+    right: 14px;
+    z-index: 40;
+    width: 52px;
+    padding: 8px;
+    background: rgba(11, 20, 38, 0.78);
+    border: 1px solid rgba(128, 128, 128, 0.22);
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+  }
+  .ring-legend {
+    display: none;
+  }
+  .state-ring {
+    width: 36px;
+    height: 36px;
+  }
+}
+
 @keyframes ringBreath {
   0%,
   100% {

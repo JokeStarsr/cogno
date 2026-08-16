@@ -18,14 +18,45 @@ export function ImportPanel({ onLoad, onClose }: Props) {
   const [url, setUrl] = useState('')
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [fetchingUrl, setFetchingUrl] = useState(false)
+  const [urlError, setUrlError] = useState('')
+
+  const loadUrl = async () => {
+    const u = url.trim()
+    if (!u) return
+    // 同源/后端 CORS 放行的 URL 可以抓到正文；失败则回退为 URL 文本导入并说明原因
+    setFetchingUrl(true)
+    setUrlError('')
+    try {
+      const res = await fetch(u, { mode: 'cors', signal: AbortSignal.timeout(8000) })
+      if (!res.ok || !res.headers.get('content-type')?.includes('text/html')) throw new Error('no-html')
+      const html = await res.text()
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      const bodyText = (doc.body?.textContent ?? '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+      if (bodyText.length > 200) {
+        const title = doc.title?.trim() || u
+        onLoad({ title: title.slice(0, 80), sourceType: 'url', text: bodyText })
+        onClose()
+        return
+      }
+      throw new Error('no-html')
+    } catch {
+      setUrlError('该网页无法直接抓取（浏览器跨域限制）。已按 URL 文本导入，或先复制网页正文再到「粘贴文本」模式阅读。')
+      onLoad({ title: u.slice(0, 80), sourceType: 'url', text: u })
+      onClose()
+    } finally {
+      setFetchingUrl(false)
+    }
+  }
 
   const load = () => {
     if (tab === 'sample') {
       onLoad({ title: '数据结构与算法导论', sourceType: 'sample', text: SAMPLE_TEXT })
     } else if (tab === 'pdf' && file) {
       onLoad({ title: file.name, sourceType: 'pdf', file })
-    } else if (tab === 'url' && url.trim()) {
-      onLoad({ title: url.trim(), sourceType: 'url', text: url.trim() })
+    } else if (tab === 'url') {
+      void loadUrl()
+      return
     } else if (tab === 'text' && text.trim()) {
       onLoad({ title: '我的笔记', sourceType: 'text', text })
     }
@@ -61,12 +92,16 @@ export function ImportPanel({ onLoad, onClose }: Props) {
             </label>
           )}
           {tab === 'url' && (
-            <input
-              className="input"
-              placeholder="https://…（受浏览器跨域限制，部分网页无法直接读取）"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
+            <div className="import-url">
+              <input
+                className="input"
+                placeholder="https://…（跨域网页将回退为 URL 文本导入）"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              {fetchingUrl && <p className="import-hint">正在抓取网页正文…</p>}
+              {urlError && <p className="import-url-error">{urlError}</p>}
+            </div>
           )}
           {tab === 'text' && (
             <textarea

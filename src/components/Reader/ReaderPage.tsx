@@ -3,7 +3,8 @@ import { useApp } from '../../context/AppContext'
 import { CognitiveEngine } from '../../lib/cognitive'
 import { AgentTrigger, AGENTS } from '../../lib/agents'
 import { createTrackingController, subscribe, type TrackingController } from '../../lib/eyeTracking'
-import { isLLMConfigured, chatCompletion } from '../../lib/llm'
+import { isLLMConfigured, chatCompletion, trimHistory, trimContext, friendlyFailure, LLMError } from '../../lib/llm'
+import { localAgentReply, resetLocalBudget } from '../../lib/localAgent'
 import { db, appendCognitiveLog, saveDoc, getDoc } from '../../lib/storage'
 import { getReviewItem } from '../../lib/spacedRepetition'
 import { getConcept } from '../../lib/knowledge'
@@ -39,7 +40,7 @@ const DEFAULT_STATE: CognitiveState = {
 }
 
 export function ReaderPage() {
-  const { settings, resumeDocId, clearResume } = useApp()
+  const { settings, resumeDocId, clearResume, view } = useApp()
   const [source, setSource] = useState<ReaderSource | null>(null)
   const [showImport, setShowImport] = useState(true)
   const [calibrating, setCalibrating] = useState(false)
@@ -75,6 +76,8 @@ export function ReaderPage() {
   stateRef.current = state
   const settingsRef = useRef(settings)
   settingsRef.current = settings
+  const viewRef = useRef(view)
+  viewRef.current = view
   const newConceptRef = useRef<string | null>(null)
   const sessionStart = useRef(Date.now())
   const sessionIdRef = useRef<number | null>(null)
@@ -95,24 +98,28 @@ export function ReaderPage() {
   }, [])
 
   // ── 认知循环 + 触发检查 ──
+  // 阅读器保持挂载（页面切换不卸载），不在阅读视图时暂停日志写入与触发检查
   useEffect(() => {
     const iv = setInterval(() => {
+      const active = viewRef.current === 'reader'
+      if (!active) return
       const st = engineRef.current.recompute()
       stateRef.current = st
       setState(st)
       appendCognitiveLog({ ...st, ts: Date.now() }).catch(() => {})
       // 页信号层推进：可见时才累计停留
       signalRef.current.tick()
-      // 每 10 次循环做一次触发检查（约 20s 一次）
+      // 每 3 次循环做一次触发检查（约 6s 一次）
       sessionCount.current++
       if (sessionCount.current % 3 === 0) runTriggerCheck()
     }, 2000)
     const boundsIv = setInterval(() => {
+      if (viewRef.current !== 'reader') return
       const el = textHandle.current?.el
       if (el) {
         const r = el.getBoundingClientRect()
         engineRef.current.setReadingBounds({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })
-        // 文本模式虚拟页检测（PDF 模式走 onPageChange）
+        // 文本模式虚拟页检测（PDF 模式走 onPageChange；滚动时由 TextViewer 即时上报）
         signalRef.current.setTextScroll(el.scrollTop, el.clientHeight)
       }
     }, 3000)
@@ -215,19 +222,25 @@ export function ReaderPage() {
     cfg: { baseUrl: string; apiKey: string; model: string }
   ) => {
     if (!isLLMConfigured(cfg)) {
+      // 未配置端点：先试本地苏格拉底（用阅读片段匹配概念，命中即可离线答疑）
+      const local = localAgentReply(agentId, ctx.slice(0, 400) || '请帮我理解刚刚读到的内容')
       setTurns((t) => [
         ...t,
         {
           agentId,
           role: 'agent',
-          content: '我检测到你似乎遇到了困难。请先在「设置」里配置 AI 端点（sub2api 地址 + key），我才能和你对话。',
+          content:
+            local ??
+            '我检测到你似乎遇到了困难。请先在「设置」里配置 AI 端点（sub2api 地址 + key），我才能和你对话。',
           reason,
+          local: !!local,
           ts: Date.now(),
         },
       ])
-      return
+      // 自动介入的消息里带上具体阅读片段，让 AI 拿到上下文（本地兜底已直接回答时不再追加）
+      if (!local) return
     }
-    const prompt = `我刚刚在阅读下面这段内容，系统判断我可能需要帮助（原因：${reason}）。请以你的角色介入。\n\n阅读片段：\n${ctx}`
+    const prompt = `我刚刚在阅读下面这段内容，系统判断我可能需要帮助（原因：${reason}）。请以你的角色介入。\n\n阅读片段：\n${trimContext(ctx)}`
     await doAgentCall(agentId, prompt, reason)
   }
 
@@ -247,16 +260,22 @@ export function ReaderPage() {
   const doAgentCall = async (agentId: AgentId, userText: string, reason?: string, context?: string) => {
     const cfg = settingsRef.current.llm
     const content = context
-      ? `我刚刚在阅读下面这段内容，请结合它回答我的问题。\n\n阅读片段：\n${context}\n\n我的问题：${userText}`
+      ? `我刚刚在阅读下面这段内容，请结合它回答我的问题。\n\n阅读片段：\n${trimContext(context)}\n\n我的问题：${userText}`
       : userText
     setTurns((t) => [...t, { agentId, role: 'user', content: userText, ts: Date.now() }])
+    // 本地兜底：命中知识图谱概念时，本地苏格拉底话术可离线作答（token 用尽也能续上对话）
+    const local = localAgentReply(agentId, userText)
     if (!isLLMConfigured(cfg)) {
       setTurns((t) => [
         ...t,
         {
           agentId,
           role: 'agent',
-          content: '请先在「设置」里配置 AI 端点与 key，我才能回复你。',
+          content:
+            local ??
+            '尚未配置 AI 端点。可以先在「设置」里填 Base URL / Key / 模型；也可以直接输入概念名（如「二分查找」「动态规划」），我可以先用本地知识库回答你。',
+          reason,
+          local: !!local,
           ts: Date.now(),
         },
       ])
@@ -271,11 +290,11 @@ export function ReaderPage() {
     }
     setAgentLoading(true)
     try {
-      // 多轮上下文：携带该代理此前的对话历史（最近 8 条），实现苏格拉底式连续追问
-      const history: ChatMessage[] = turnsRef.current
-        .filter((t) => t.agentId === agentId)
-        .slice(-8)
-        .map((t) => ({ role: (t.role === 'user' ? 'user' : 'assistant') as ChatMessage['role'], content: t.content }))
+      // 多轮上下文：Token 预算化裁剪（不是固定条数），保留最近的追问
+      const history: ChatMessage[] = trimHistory(turnsRef.current, agentId).map((t) => ({
+        role: (t.role === 'user' ? 'user' : 'assistant') as ChatMessage['role'],
+        content: t.content,
+      }))
       // 分档模型：澄清者/连接者走轻量模型省成本
       const model = FAST_AGENTS.includes(agentId) ? settingsRef.current.fastModel : cfg.model
       const text = await chatCompletion(
@@ -291,9 +310,20 @@ export function ReaderPage() {
       agentCache.set(cacheKey, text)
       setTurns((t) => [...t, { agentId, role: 'agent', content: text, reason, ts: Date.now() }])
     } catch (e) {
+      // 余额不足/限流/服务端故障等 → 本地兜底，对话不断裂；都答不了再报可操作提示
+      const err = e as Error
+      const kind = err instanceof LLMError ? err.kind : 'unknown'
       setTurns((t) => [
         ...t,
-        { agentId, role: 'agent', content: `（出错了：${(e as Error).message}）`, ts: Date.now() },
+        {
+          agentId,
+          role: 'agent',
+          content:
+            local ?? friendlyFailure(kind, err.message),
+          reason,
+          local: !!local,
+          ts: Date.now(),
+        },
       ])
     } finally {
       setAgentLoading(false)
@@ -320,6 +350,11 @@ export function ReaderPage() {
   const handleScrollDelta = useCallback((d: number) => {
     engineRef.current.pushScroll(d)
     signalRef.current.reportScroll()
+  }, [])
+
+  /** 文本模式滚动即时虚拟页检测（每 3s 的轮询仍保留作兜底） */
+  const handleVirtualScroll = useCallback((scrollTop: number, viewportH: number) => {
+    signalRef.current.setTextScroll(scrollTop, viewportH)
   }, [])
 
   /** PDF 逐页文本抽取完成：缓存给代理取上下文，并扫描首页概念 */
@@ -367,6 +402,7 @@ export function ReaderPage() {
     sessionStart.current = Date.now()
     triggerRef.current.reset()
     signalRef.current.reset()
+    resetLocalBudget()
     baselineRef.current = loadBaselineRate()
     pdfSeenRef.current = new Set()
     void db.sessions.add({
@@ -522,6 +558,7 @@ export function ReaderPage() {
                       ref={textHandle}
                       text={source.text ?? ''}
                       onScroll={handleScrollDelta}
+                      onVirtualScroll={handleVirtualScroll}
                       onConceptSeen={handleConceptSeen}
                     />
                     <div className="reader-feedback">

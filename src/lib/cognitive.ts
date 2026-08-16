@@ -62,10 +62,10 @@ export class CognitiveEngine {
     return g.x >= b.left && g.x <= b.right && g.y >= b.top && g.y <= b.bottom
   }
 
-  /** 每 ~2s 调用一次，重算状态 */
+  /** 每 ~2s 调用一次，重算状态（samples 已在 pushGaze 时窗口裁剪，无需再 filter） */
   recompute(): CognitiveState {
     const now = Date.now()
-    const win = this.samples.filter((s) => now - s.ts < SAMPLE_WINDOW)
+    const win = this.samples
     const n = win.length
 
     let understanding = this.state.understanding

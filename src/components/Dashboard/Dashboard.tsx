@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { listConcepts, listDue } from '../../lib/spacedRepetition'
 import { getConcept } from '../../lib/knowledge'
@@ -7,12 +7,12 @@ import type { ReviewItem, ReadingSession } from '../../types'
 import './Dashboard.css'
 
 export function Dashboard() {
-  const { setView, requestResume } = useApp()
+  const { view, setView, requestResume } = useApp()
   const [concepts, setConcepts] = useState<ReviewItem[]>([])
   const [due, setDue] = useState<ReviewItem[]>([])
   const [sessions, setSessions] = useState<ReadingSession[]>([])
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let alive = true
     ;(async () => {
       const [c, d, s] = await Promise.all([listConcepts(), listDue(), db.sessions.orderBy('startedAt').reverse().limit(7).toArray()])
@@ -26,12 +26,26 @@ export function Dashboard() {
     }
   }, [])
 
+  // 页面随视图保持挂载：每次切回概览时刷新数据
+  useEffect(() => {
+    if (view !== 'dashboard') return
+    return load()
+  }, [view, load])
+
+  // 首次进入：三步引导（可关闭，存 localStorage）
+  const [showGuide, setShowGuide] = useState(() => localStorage.getItem('cogno.guideDismissed') !== '1')
+  const dismissGuide = () => {
+    localStorage.setItem('cogno.guideDismissed', '1')
+    setShowGuide(false)
+  }
+
   const mastered = concepts.filter((c) => c.mastery >= 2).length
   const deepMastered = concepts.filter((c) => c.mastery === 3).length
-  const todayMs = sessions.reduce((a, s) => a + s.durationSec, 0)
-  const days = new Set(
-    sessions.map((s) => new Date(s.startedAt).toISOString().slice(0, 10))
-  ).size
+  const todayKey = localDateKey(Date.now())
+  const todayMs = sessions
+    .filter((s) => localDateKey(s.startedAt) === todayKey)
+    .reduce((a, s) => a + s.durationSec, 0)
+  const days = new Set(sessions.map((s) => localDateKey(s.startedAt))).size
 
   const cards = [
     { label: '今日阅读', value: formatDuration(todayMs), hint: `${sessions.length} 次会话` },
@@ -43,6 +57,36 @@ export function Dashboard() {
   return (
     <div className="dashboard">
       <h1 className="dash-title">学习概览</h1>
+      {showGuide && (
+        <div className="dash-guide panel">
+          <div className="dash-guide-steps">
+            <div className="guide-step">
+              <span className="guide-num">1</span>
+              <div>
+                <b>配置 AI 代理</b>
+                <p>在「设置」填入 sub2api 端点与 Key，苏格拉底四代理才能介入对话</p>
+              </div>
+            </div>
+            <div className="guide-step">
+              <span className="guide-num">2</span>
+              <div>
+                <b>开始阅读</b>
+                <p>导入一篇文章，眼动/鼠标信号会实时推断你的认知状态</p>
+              </div>
+            </div>
+            <div className="guide-step">
+              <span className="guide-num">3</span>
+              <div>
+                <b>思考被推动</b>
+                <p>困惑时「澄清者」介入，读得太浅时「挑战者」追问，新概念自动连到知识网格</p>
+              </div>
+            </div>
+          </div>
+          <button className="btn-ghost" onClick={dismissGuide}>
+            知道了
+          </button>
+        </div>
+      )}
       <div className="dash-cards">
         {cards.map((c) => (
           <div key={c.label} className="dash-card panel">
@@ -122,6 +166,14 @@ function safeLabel(id: string): string {
   } catch {
     return id
   }
+}
+
+/** 本地时区日期键（YYYY-MM-DD），toISOString 是 UTC 会算错"今天" */
+function localDateKey(ts: number): string {
+  const d = new Date(ts)
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
 }
 
 function formatDuration(sec: number): string {

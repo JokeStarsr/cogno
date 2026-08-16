@@ -1,7 +1,16 @@
 import { useEffect, useRef } from 'react'
-import cytoscape, { type Core } from 'cytoscape'
+import type cytoscape from 'cytoscape'
+import type { Core, EventObject } from 'cytoscape'
 import { getAllNodes } from '../../lib/knowledge'
 import type { Mastery } from '../../types'
+
+type CyModule = { default: typeof cytoscape }
+let cytoscapeModule: Promise<CyModule> | null = null
+/** 抽屉打开才加载 cytoscape（~300KB 体积，不阻塞阅读器首屏） */
+function loadCytoscape(): Promise<CyModule> {
+  cytoscapeModule ??= import('cytoscape') as Promise<CyModule>
+  return cytoscapeModule
+}
 
 export const MASTERY_COLOR: Record<Mastery, string> = {
   0: '#6b7684', // 未学习
@@ -27,60 +36,65 @@ export function GridCanvas({ mastery, focusId, path, onSelect }: Props) {
   useEffect(() => {
     const el = containerRef.current
     if (!el || cyRef.current) return
+    let alive = true
     const nodes = getAllNodes()
-    const cy = cytoscape({
-      container: el,
-      elements: [
-        ...nodes.map((n) => ({
-          data: { id: n.id, label: n.label, domain: n.domain, desc: n.description },
-        })),
-        ...nodes.flatMap((n) =>
-          n.dependencies.map((d) => ({ data: { id: `${d}->${n.id}`, source: d, target: n.id } }))
-        ),
-      ],
-      layout: {
-        name: 'cose',
-        animate: false,
-        padding: 24,
-        nodeRepulsion: () => 4200,
-        idealEdgeLength: () => 70,
-        gravity: 0.25,
-      },
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'background-color': '#6b7684',
-            label: 'data(label)',
-            color: '#c9d2e0',
-            'font-size': 11,
-            'text-valign': 'bottom',
-            'text-margin-y': 4,
-            'width': 22,
-            'height': 22,
-            'border-width': 1,
-            'border-color': 'rgba(255,255,255,0.15)',
-          },
+    void loadCytoscape().then(({ default: cytoscape }) => {
+      if (!alive) return
+      const cy = cytoscape({
+        container: el,
+        elements: [
+          ...nodes.map((n) => ({
+            data: { id: n.id, label: n.label, domain: n.domain, desc: n.description },
+          })),
+          ...nodes.flatMap((n) =>
+            n.dependencies.map((d) => ({ data: { id: `${d}->${n.id}`, source: d, target: n.id } }))
+          ),
+        ],
+        layout: {
+          name: 'cose',
+          animate: false,
+          padding: 24,
+          nodeRepulsion: () => 4200,
+          idealEdgeLength: () => 70,
+          gravity: 0.25,
         },
-        {
-          selector: 'edge',
-          style: {
-            width: 1.2,
-            'line-color': 'rgba(128,128,128,0.32)',
-            'curve-style': 'bezier',
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': '#6b7684',
+              label: 'data(label)',
+              color: '#c9d2e0',
+              'font-size': 11,
+              'text-valign': 'bottom',
+              'text-margin-y': 4,
+              'width': 22,
+              'height': 22,
+              'border-width': 1,
+              'border-color': 'rgba(255,255,255,0.15)',
+            },
           },
-        },
-        { selector: '.focus', style: { 'border-width': 3, 'border-color': '#40e0d0' } },
-        { selector: '.path', style: { 'line-color': '#40e0d0', 'width': 2.5, 'target-arrow-color': '#40e0d0' } },
-        { selector: '.path-node', style: { 'border-width': 2, 'border-color': '#40e0d0' } },
-      ],
-    })
-    cyRef.current = cy
-    cy.on('tap', 'node', (evt) => {
-      onSelectRef.current(evt.target.id())
+          {
+            selector: 'edge',
+            style: {
+              width: 1.2,
+              'line-color': 'rgba(128,128,128,0.32)',
+              'curve-style': 'bezier',
+            },
+          },
+          { selector: '.focus', style: { 'border-width': 3, 'border-color': '#40e0d0' } },
+          { selector: '.path', style: { 'line-color': '#40e0d0', 'width': 2.5, 'target-arrow-color': '#40e0d0' } },
+          { selector: '.path-node', style: { 'border-width': 2, 'border-color': '#40e0d0' } },
+        ],
+      })
+      cyRef.current = cy
+      cy.on('tap', 'node', (evt: EventObject) => {
+        onSelectRef.current(evt.target.id())
+      })
     })
     return () => {
-      cy.destroy()
+      alive = false
+      cyRef.current?.destroy()
       cyRef.current = null
     }
   }, [])

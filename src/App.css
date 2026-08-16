@@ -64,6 +64,17 @@
   position: relative;
 }
 
+/* 页面切换：保持挂载 + 显隐，阅读进度不因切页丢失 */
+.page {
+  display: none;
+  height: 100%;
+  position: absolute;
+  inset: 0;
+}
+.page.page-active {
+  display: block;
+}
+
 @keyframes brandBreath {
   0%,
   100% {
@@ -73,5 +84,19 @@
   50% {
     transform: scale(0.82);
     opacity: 0.7;
+  }
+}
+
+@media (max-width: 720px) {
+  .top-nav {
+    gap: 10px;
+    padding: 8px 12px;
+  }
+  .brand-name {
+    font-size: 14px;
+  }
+  .nav-link {
+    padding: 5px 10px;
+    font-size: 13px;
   }
 }
