@@ -90,6 +90,19 @@ export interface TriggerInput {
 /** 触发阈值默认值：读出真实含义并在设置页暴露调整 */
 export const DEFAULT_TRIGGER_CONFIG: AgentTriggerConfig = {
   enabled: { clarifier: true, challenger: true, connector: true, expander: true },
+  cooldownSec: 360,
+  clarifyUnderstand: 35,
+  clarifyReread: 6,
+  challengeScrollPx: 6000,
+  expanderUnderstand: 70,
+  expanderDwellSec: 120,
+  nudgeDwellSec: 150,
+  nudgeCooldownSec: 360,
+}
+
+/** v2 之前的旧默认值：识别「从未自定义过触发参数」的老存档并自动升级 */
+export const LEGACY_TRIGGER_CONFIG: AgentTriggerConfig = {
+  enabled: { clarifier: true, challenger: true, connector: true, expander: true },
   cooldownSec: 180,
   clarifyUnderstand: 45,
   clarifyReread: 3,

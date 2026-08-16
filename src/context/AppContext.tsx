@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { db, setSetting } from '../lib/storage'
-import { DEFAULT_TRIGGER_CONFIG } from '../lib/agents'
-import type { AgentTriggerConfig, LLMConfig, ViewId } from '../types'
+import { DEFAULT_TRIGGER_CONFIG, LEGACY_TRIGGER_CONFIG } from '../lib/agents'
+import type { AgentId, AgentTriggerConfig, LLMConfig, ViewId } from '../types'
 
 export interface AppSettings {
   llm: LLMConfig
@@ -50,7 +50,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ;(async () => {
       const saved = await db.settings.get('app')
       if (saved?.value && alive) {
-        const s = saved.value as Partial<AppSettings>
+        let s = saved.value as Partial<AppSettings>
+        // 触发参数 v2 迁移：整个 triggers 仍等于旧默认值（从未自定义过）的老存档，
+        // 丢弃后由合并逻辑自然升级为新默认；自定义过任一值的存档不动
+        if (s.triggers && equalTriggers(s.triggers, LEGACY_TRIGGER_CONFIG)) {
+          s = { ...s, triggers: undefined }
+        }
         setSettings({
           ...DEFAULT_SETTINGS,
           ...s,
@@ -90,4 +95,21 @@ export function useApp(): AppContextValue {
   const ctx = useContext(AppContext)
   if (!ctx) throw new Error('useApp must be used within AppProvider')
   return ctx
+}
+
+/** 字段级比较，忽略对象键顺序差异 */
+function equalTriggers(a: AgentTriggerConfig, b: AgentTriggerConfig): boolean {
+  return (
+    a.cooldownSec === b.cooldownSec &&
+    a.clarifyUnderstand === b.clarifyUnderstand &&
+    a.clarifyReread === b.clarifyReread &&
+    a.challengeScrollPx === b.challengeScrollPx &&
+    a.expanderUnderstand === b.expanderUnderstand &&
+    a.expanderDwellSec === b.expanderDwellSec &&
+    a.nudgeDwellSec === b.nudgeDwellSec &&
+    a.nudgeCooldownSec === b.nudgeCooldownSec &&
+    ['clarifier', 'challenger', 'connector', 'expander'].every(
+      (k) => a.enabled[k as AgentId] === b.enabled[k as AgentId]
+    )
+  )
 }

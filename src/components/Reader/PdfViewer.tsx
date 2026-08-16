@@ -80,6 +80,8 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer(
   const [scale, setScale] = useState(1.4)
   const [doc, setDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [pageProxies, setPageProxies] = useState<pdfjsLib.PDFPageProxy[]>([])
+  /** 整本 PDF 都抽不出文本（图片扫描件无文本层） */
+  const [noText, setNoText] = useState(false)
   const onRendered = useCallback(() => {}, [])
   const pageTextsRef = useRef<string[]>([])
   const lastPageRef = useRef(-1)
@@ -122,6 +124,7 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer(
     let alive = true
     let task: ReturnType<typeof pdfjsLib.getDocument> | null = null
     setState({ loading: true, error: '', pages: 0 })
+    setNoText(false)
     setPageProxies([])
     pageTextsRef.current = []
     lastPageRef.current = -1
@@ -155,9 +158,9 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer(
           if (!alive) return
           pageTextsRef.current = texts
           onTextReady?.(texts)
-          if (texts.length && !texts.some((t) => t.length > 0)) {
-            console.warn('PDF 未抽取到文本（可能是扫描件）')
-          }
+          const scanned = texts.length > 0 && !texts.some((t) => t.length > 0)
+          setNoText(scanned)
+          if (scanned) console.warn('PDF 未抽取到文本（可能是扫描件）')
         })()
       } catch (e) {
         if (alive) setState({ loading: false, error: (e as Error).message, pages: 0 })
@@ -208,6 +211,11 @@ export const PdfViewer = forwardRef<PdfHandle, Props>(function PdfViewer(
       <div ref={scrollRef} className="pdf-canvas" onScroll={handleScroll}>
         {state.loading && <div className="pdf-hint">正在加载 PDF…</div>}
         {state.error && <div className="pdf-hint error">PDF 解析失败：{state.error}</div>}
+        {noText && (
+          <div className="pdf-hint">
+            这是图片扫描件，PDF 中没有可抽取的文本层，AI 角色看不到内容——建议换文字版 PDF，或复制正文粘贴到文本模式阅读
+          </div>
+        )}
         {pageProxies.map((p) => (
           <PdfPage key={p.pageNumber} page={p} scale={scale} onRendered={onRendered} />
         ))}

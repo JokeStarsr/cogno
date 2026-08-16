@@ -222,8 +222,11 @@ export function ReaderPage() {
     void autoIntervene('connector', visibleContext(), '你主动标记了重要内容', settingsRef.current.llm)
   }
 
-  const doAgentCall = async (agentId: AgentId, userText: string, reason?: string) => {
+  const doAgentCall = async (agentId: AgentId, userText: string, reason?: string, context?: string) => {
     const cfg = settingsRef.current.llm
+    const content = context
+      ? `我刚刚在阅读下面这段内容，请结合它回答我的问题。\n\n阅读片段：\n${context}\n\n我的问题：${userText}`
+      : userText
     setTurns((t) => [...t, { agentId, role: 'user', content: userText, ts: Date.now() }])
     if (!isLLMConfigured(cfg)) {
       setTurns((t) => [
@@ -237,7 +240,7 @@ export function ReaderPage() {
       ])
       return
     }
-    // 常见问答缓存：同代理 + 同问题直接复用，避免重复计费
+    // 常见问答缓存：同代理 + 同问题直接复用，避免重复计费（key 不含阅读片段，保证同问题缓存命中）
     const cacheKey = `${agentId}:${userText.trim()}`
     const cached = agentCache.get(cacheKey)
     if (cached) {
@@ -256,7 +259,7 @@ export function ReaderPage() {
       const text = await chatCompletion(
         { ...cfg, model },
         AGENTS[agentId].systemPrompt,
-        [...history, { role: 'user', content: userText }],
+        [...history, { role: 'user', content }],
         { maxTokens: 1024 }
       )
       if (agentCache.size >= CACHE_MAX) {
@@ -534,7 +537,7 @@ export function ReaderPage() {
           onSelectAgent={setActiveAgent}
           turns={turns}
           loading={agentLoading}
-          onSend={(agentId, text) => void doAgentCall(agentId, text)}
+          onSend={(agentId, text) => void doAgentCall(agentId, text, undefined, visibleContext())}
           onClose={() => setAgentOpen(false)}
           lastReason={lastReason}
         />
