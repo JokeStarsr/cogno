@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { nodeById } from '../../data/dsAlgoGraph'
+import { scanConceptsInText } from '../../lib/concepts'
 
 export interface TextHandle {
   el: HTMLDivElement | null
@@ -60,16 +61,7 @@ export const TextViewer = forwardRef<TextHandle, Props>(function TextViewer(
     if (!onConceptSeen) return
     const el = elRef.current
     if (!el) return
-    const scan = () => {
-      const inner = el.innerText
-      for (const n of nodeById.values()) {
-        if (seenRef.current.has(n.id)) continue
-        if (inner.includes(n.label)) {
-          seenRef.current.add(n.id)
-          onConceptSeen(n.id)
-        }
-      }
-    }
+    const scan = () => scanConceptsInText(el.innerText, onConceptSeen, seenRef.current)
     const observer = new MutationObserver(scan)
     observer.observe(el, { childList: true, subtree: true, characterData: true })
     scan()

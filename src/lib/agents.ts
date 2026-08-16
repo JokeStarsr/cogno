@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentId, AgentIntervention, CognitiveState } from '../types'
+import type { AgentConfig, AgentId, AgentIntervention, AgentTriggerConfig, CognitiveState } from '../types'
 
 /** 苏格拉底四代理 —— 不同思维角色的 system prompt */
 export const AGENTS: Record<AgentId, AgentConfig> = {
@@ -87,36 +87,59 @@ export interface TriggerInput {
   masteredLabels: string[]
 }
 
-/** 自动介入冷却：同一代理 3 分钟内不重复触发 */
+/** 触发阈值默认值：读出真实含义并在设置页暴露调整 */
+export const DEFAULT_TRIGGER_CONFIG: AgentTriggerConfig = {
+  enabled: { clarifier: true, challenger: true, connector: true, expander: true },
+  cooldownSec: 180,
+  clarifyUnderstand: 45,
+  clarifyReread: 3,
+  challengeScrollPx: 1800,
+  expanderUnderstand: 70,
+  expanderDwellSec: 120,
+  nudgeDwellSec: 60,
+  nudgeCooldownSec: 120,
+}
+
+/** 自动介入冷却：同一代理在 cooldownSec 内不重复触发 */
 export class AgentTrigger {
   private lastAuto = new Map<AgentId, number>()
-  private minGapMs = 3 * 60_000
 
   reset() {
     this.lastAuto.clear()
   }
 
-  setMinGap(ms: number) {
-    this.minGapMs = ms
-  }
-
-  /** 根据认知状态与阅读行为，决定是否让某个代理自动介入 */
-  evaluate(input: TriggerInput): AgentIntervention | null {
+  /**
+   * 根据认知状态与阅读行为，决定是否让某个代理自动介入。
+   * sensitivity 为「触发灵敏度」乘数(0.5-2)：越高越容易触发。
+   * 所有阈值会除以 sensitivity 后再比较 —— 等价于让实测信号放大。
+   */
+  evaluate(
+    input: TriggerInput,
+    cfg: AgentTriggerConfig = DEFAULT_TRIGGER_CONFIG,
+    sensitivity = 1
+  ): AgentIntervention | null {
     const { state, rereadCount, scrollPx, maxDwellMs, newConceptId } = input
 
     // 心流：静默，绝不打扰（最高优先级）
     if (state.flow) return null
+    const sens = sensitivity > 0 ? sensitivity : 1
+    const th = (v: number) => v / sens
 
     let agentId: AgentId | null = null
     let reason = ''
 
-    // 困惑 → 澄清者：反复回读 + 停留很久 = 卡住了
-    if (state.understanding < 45 && rereadCount >= 3) {
+    // 困惑 → 澄清者：低理解深度 + 反复回读 = 卡住了
+    if (state.understanding < cfg.clarifyUnderstand && rereadCount >= th(cfg.clarifyReread)) {
       agentId = 'clarifier'
       reason = `理解深度降到 ${Math.round(state.understanding)}，最近 5 分钟回读了 ${rereadCount} 次，像是卡在某个概念上了`
     }
-    // 浅层扫描 → 挑战者：快速滚动 + 少回读
-    else if (state.attention > 40 && scrollPx > 1800 && rereadCount < 2) {
+    // 浅层扫描 → 挑战者：快速滚动 + 少回读；已困惑时不打扰（避免连着被两个角色轰炸）
+    else if (
+      state.understanding >= cfg.clarifyUnderstand &&
+      state.attention > 40 &&
+      scrollPx > th(cfg.challengeScrollPx) &&
+      rereadCount < 2
+    ) {
       agentId = 'challenger'
       reason = '滚动很快、很少回读，可能只是在表面扫描，没有真正消化'
     }
@@ -126,15 +149,15 @@ export class AgentTrigger {
       reason = '遇到了新概念，帮你把它和已经掌握的知识连起来'
     }
     // 深度理解 → 拓展者：长时间高理解
-    else if (state.understanding > 70 && maxDwellMs > 120_000) {
+    else if (state.understanding > cfg.expanderUnderstand && maxDwellMs > th(cfg.expanderDwellSec) * 1000) {
       agentId = 'expander'
       reason = '已经在这个概念上深度沉浸一段时间了，可以看看更远的地方'
     }
 
-    if (!agentId) return null
+    if (!agentId || !cfg.enabled[agentId]) return null
 
     const last = this.lastAuto.get(agentId) ?? 0
-    if (Date.now() - last < this.minGapMs) return null
+    if (Date.now() - last < cfg.cooldownSec * 1000) return null
     this.lastAuto.set(agentId, Date.now())
 
     return { agentId, ts: Date.now(), reason }

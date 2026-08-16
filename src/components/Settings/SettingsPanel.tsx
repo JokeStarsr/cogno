@@ -1,20 +1,33 @@
 import { useState } from 'react'
 import { useApp } from '../../context/AppContext'
+import { AGENTS } from '../../lib/agents'
 import { db } from '../../lib/storage'
 import { isLLMConfigured } from '../../lib/llm'
+import type { AgentId } from '../../types'
 import './SettingsPanel.css'
+
+const AGENT_IDS: AgentId[] = ['clarifier', 'challenger', 'connector', 'expander']
 
 export function SettingsPanel() {
   const { settings, updateSettings } = useApp()
   const [saved, setSaved] = useState(false)
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     baseUrl: settings.llm.baseUrl,
     apiKey: settings.llm.apiKey,
     model: settings.llm.model,
     fastModel: settings.fastModel,
     sensitivity: settings.sensitivity,
     mouseProxy: settings.mouseProxy,
-  })
+    trigEnabled: { ...settings.triggers.enabled },
+    trigCooldownMin: settings.triggers.cooldownSec / 60,
+    trigClarifyUnderstand: settings.triggers.clarifyUnderstand,
+    trigClarifyReread: settings.triggers.clarifyReread,
+    trigChallengeScroll: settings.triggers.challengeScrollPx,
+    trigExpanderUnderstand: settings.triggers.expanderUnderstand,
+    trigExpanderDwellSec: settings.triggers.expanderDwellSec,
+    trigNudgeDwellSec: settings.triggers.nudgeDwellSec,
+    trigNudgeCooldownMin: settings.triggers.nudgeCooldownSec / 60,
+  }))
 
   const save = async () => {
     await updateSettings({
@@ -22,6 +35,17 @@ export function SettingsPanel() {
       fastModel: form.fastModel,
       sensitivity: form.sensitivity,
       mouseProxy: form.mouseProxy,
+      triggers: {
+        enabled: form.trigEnabled,
+        cooldownSec: Math.round(form.trigCooldownMin * 60),
+        clarifyUnderstand: form.trigClarifyUnderstand,
+        clarifyReread: form.trigClarifyReread,
+        challengeScrollPx: form.trigChallengeScroll,
+        expanderUnderstand: form.trigExpanderUnderstand,
+        expanderDwellSec: form.trigExpanderDwellSec,
+        nudgeDwellSec: form.trigNudgeDwellSec,
+        nudgeCooldownSec: Math.round(form.trigNudgeCooldownMin * 60),
+      },
     })
     setSaved(true)
     setTimeout(() => setSaved(false), 1600)
@@ -98,6 +122,124 @@ export function SettingsPanel() {
         <p className="set-note">澄清者/连接者走轻量模型（成本更低），挑战者/拓展者走上方主模型。</p>
         <div className={`set-status ${configured ? 'ok' : 'warn'}`}>
           {configured ? '✓ AI 已配置，代理可用' : '⚠ 尚未配置完整，代理对话不可用'}
+        </div>
+      </section>
+
+      <section className="set-section panel">
+        <h2>苏格拉底代理 · 自动介入</h2>
+        <p className="set-note">
+          四角色按阅读行为自动介入。可逐代理开关，也可调整触发阈值——觉得谁爱出来凑热闹或总不来，就在这调。
+          「触发灵敏度」会放大/缩小所有实测信号（越高越容易触发）。
+        </p>
+        <div className="set-row">
+          <label>自动介入</label>
+          <div className="agent-toggles">
+            {AGENT_IDS.map((id) => (
+              <label key={id} className="agent-toggle">
+                <span className="agent-dot" style={{ background: AGENTS[id].color }} />
+                <span className="agent-toggle-name">{AGENTS[id].name}</span>
+                <input
+                  type="checkbox"
+                  checked={form.trigEnabled[id]}
+                  onChange={(e) =>
+                    setForm({ ...form, trigEnabled: { ...form.trigEnabled, [id]: e.target.checked } })
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="set-row">
+          <label>介入冷却</label>
+          <input
+            className="num"
+            type="number"
+            min="0.5"
+            max="20"
+            step="0.5"
+            value={form.trigCooldownMin}
+            onChange={(e) => setForm({ ...form, trigCooldownMin: Number(e.target.value) })}
+          />
+          <span className="set-hint">分钟 · 同一角色两次自动介入的最小间隔</span>
+        </div>
+        <div className="set-row">
+          <label>澄清者</label>
+          <span className="set-hint">理解深度低于</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            max="100"
+            value={form.trigClarifyUnderstand}
+            onChange={(e) => setForm({ ...form, trigClarifyUnderstand: Number(e.target.value) })}
+          />
+          <span className="set-hint">% 且 5 分钟回读 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            max="20"
+            value={form.trigClarifyReread}
+            onChange={(e) => setForm({ ...form, trigClarifyReread: Number(e.target.value) })}
+          />
+          <span className="set-hint">次</span>
+        </div>
+        <div className="set-row">
+          <label>挑战者</label>
+          <span className="set-hint">5 分钟滚动 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            step="100"
+            value={form.trigChallengeScroll}
+            onChange={(e) => setForm({ ...form, trigChallengeScroll: Number(e.target.value) })}
+          />
+          <span className="set-hint">px 且回读少</span>
+        </div>
+        <div className="set-row">
+          <label>拓展者</label>
+          <span className="set-hint">理解深度高于</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            max="100"
+            value={form.trigExpanderUnderstand}
+            onChange={(e) => setForm({ ...form, trigExpanderUnderstand: Number(e.target.value) })}
+          />
+          <span className="set-hint">% 且停留 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            step="10"
+            value={form.trigExpanderDwellSec}
+            onChange={(e) => setForm({ ...form, trigExpanderDwellSec: Number(e.target.value) })}
+          />
+          <span className="set-hint">秒</span>
+        </div>
+        <div className="set-row">
+          <label>主动提问</label>
+          <span className="set-hint">内容上停留 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            step="5"
+            value={form.trigNudgeDwellSec}
+            onChange={(e) => setForm({ ...form, trigNudgeDwellSec: Number(e.target.value) })}
+          />
+          <span className="set-hint">秒弹出气泡，间隔 ≥</span>
+          <input
+            className="num"
+            type="number"
+            min="0"
+            step="0.5"
+            value={form.trigNudgeCooldownMin}
+            onChange={(e) => setForm({ ...form, trigNudgeCooldownMin: Number(e.target.value) })}
+          />
+          <span className="set-hint">分钟</span>
         </div>
       </section>
 

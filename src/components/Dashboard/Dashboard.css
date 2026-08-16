@@ -89,9 +89,16 @@
   font-size: 12px;
 }
 
-.dash-sessions li {
-  padding: 6px 0;
+.dash-sessions .sess-item {
+  padding: 8px 8px;
+  margin: 0 -8px;
   border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dash-sessions .sess-item:hover {
+  background: rgba(128, 128, 128, 0.09);
 }
 .sess-title {
   font-size: 14px;
@@ -101,6 +108,9 @@
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+.sess-resume {
+  color: var(--agent-connector, #9370db);
 }
 
 @media (max-width: 760px) {

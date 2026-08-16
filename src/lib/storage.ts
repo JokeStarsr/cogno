@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { ReadingSession, ReviewItem, CognitiveSample } from '../types'
+import type { ReadingSession, ReviewItem, CognitiveSample, ReadingDoc } from '../types'
 
 /** 隐私优先：全部数据仅存浏览器本地 IndexedDB，不上传云端 */
 class CognoDB extends Dexie {
@@ -7,6 +7,7 @@ class CognoDB extends Dexie {
   concepts!: Table<ReviewItem, string>
   sessions!: Table<ReadingSession, number>
   cognitiveLogs!: Table<CognitiveSample, number>
+  docs!: Table<ReadingDoc, number>
 
   constructor() {
     super('cogno')
@@ -15,6 +16,10 @@ class CognoDB extends Dexie {
       concepts: 'conceptId, nextReviewAt, mastery',
       sessions: '++id, startedAt',
       cognitiveLogs: '++id, ts',
+    })
+    // v2: 新增 docs 表，保存文档内容（PDF 二进制 + 抽取文本）
+    this.version(2).stores({
+      docs: '++id, createdAt',
     })
   }
 }
@@ -40,4 +45,12 @@ export async function appendCognitiveLog(sample: CognitiveSample): Promise<void>
 
 export async function recentCognitiveLogs(limit = 200): Promise<CognitiveSample[]> {
   return db.cognitiveLogs.orderBy('ts').reverse().limit(limit).toArray()
+}
+
+export async function saveDoc(doc: ReadingDoc): Promise<number> {
+  return db.docs.add(doc)
+}
+
+export async function getDoc(id: number): Promise<ReadingDoc | undefined> {
+  return db.docs.get(id)
 }

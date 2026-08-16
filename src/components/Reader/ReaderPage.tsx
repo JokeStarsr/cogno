@@ -4,12 +4,13 @@ import { CognitiveEngine } from '../../lib/cognitive'
 import { AgentTrigger, AGENTS } from '../../lib/agents'
 import { createTrackingController, subscribe, type TrackingController } from '../../lib/eyeTracking'
 import { isLLMConfigured, chatCompletion } from '../../lib/llm'
-import { db, appendCognitiveLog } from '../../lib/storage'
+import { db, appendCognitiveLog, saveDoc, getDoc } from '../../lib/storage'
 import { getReviewItem } from '../../lib/spacedRepetition'
 import { getConcept } from '../../lib/knowledge'
+import { scanConceptsInText } from '../../lib/concepts'
 import { CognitiveStateRing } from '../StateRing/CognitiveStateRing'
 import { TextViewer, type TextHandle } from './TextViewer'
-import { PdfViewer } from './PdfViewer'
+import { PdfViewer, type PdfHandle } from './PdfViewer'
 import { ImportPanel, type ReaderSource } from './ImportPanel'
 import { CalibrationOverlay } from './CalibrationOverlay'
 import { AgentPanel, type AgentTurn } from '../AgentPanel/AgentPanel'
@@ -33,7 +34,7 @@ const DEFAULT_STATE: CognitiveState = {
 }
 
 export function ReaderPage() {
-  const { settings } = useApp()
+  const { settings, resumeDocId, clearResume } = useApp()
   const [source, setSource] = useState<ReaderSource | null>(null)
   const [showImport, setShowImport] = useState(true)
   const [calibrating, setCalibrating] = useState(false)
@@ -59,6 +60,9 @@ export function ReaderPage() {
   const triggerRef = useRef(new AgentTrigger())
   const controllerRef = useRef<TrackingController | null>(null)
   const textHandle = useRef<TextHandle>(null)
+  const pdfHandle = useRef<PdfHandle>(null)
+  const pdfTextsRef = useRef<string[]>([])
+  const pdfSeenRef = useRef<Set<string>>(new Set())
   const stateRef = useRef(state)
   stateRef.current = state
   const settingsRef = useRef(settings)
@@ -138,23 +142,28 @@ export function ReaderPage() {
 
   const runTriggerCheck = () => {
     const cfg = settingsRef.current.llm
+    const trig = settingsRef.current.triggers
     const stats = engineRef.current.getStats()
     const masteredLabels = [...mastery].filter(([, m]) => m >= 2).map(([id]) => safeLabel(id))
-    const interv = triggerRef.current.evaluate({
-      state: stateRef.current,
-      rereadCount: stats.rereadCount,
-      scrollPx: stats.scrollPx,
-      maxDwellMs: stats.maxDwellMs,
-      newConceptId: newConceptRef.current ?? undefined,
-      masteredLabels,
-    })
+    const interv = triggerRef.current.evaluate(
+      {
+        state: stateRef.current,
+        rereadCount: stats.rereadCount,
+        scrollPx: stats.scrollPx,
+        maxDwellMs: stats.maxDwellMs,
+        newConceptId: newConceptRef.current ?? undefined,
+        masteredLabels,
+      },
+      trig,
+      settingsRef.current.sensitivity
+    )
     newConceptRef.current = null
-    // 主动提问气泡：在内容上停留较久(≥60s)且非心流 → 温和提问
+    // 主动提问气泡：在内容上停留超过配置时长且非心流 → 温和提问
     if (
       !nudgeRef.current &&
       !stateRef.current.flow &&
-      stats.maxDwellMs >= 60_000 &&
-      Date.now() - lastNudgeAt.current > 2 * 60_000
+      stats.maxDwellMs >= trig.nudgeDwellSec * 1000 &&
+      Date.now() - lastNudgeAt.current > trig.nudgeCooldownSec * 1000
     ) {
       lastNudgeAt.current = Date.now()
       const text = '感觉你在某段内容上停留了一会儿 —— 这段讲的是什么?能用你自己的话复述一下吗?'
@@ -165,9 +174,16 @@ export function ReaderPage() {
       setLastReason(interv.reason)
       setActiveAgent(interv.agentId)
       setAgentOpen(true)
-      const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
+      const ctx = visibleContext()
       void autoIntervene(interv.agentId, ctx, interv.reason, cfg)
     }
+  }
+
+  /** 当前可见阅读片段：文本走 TextViewer，PDF 走当前页(±1)抽取文本。
+   *  用 ref 判定 PDF 与否，避免被首个渲染闭包中的 stale state 误导。 */
+  const visibleContext = (): string => {
+    if (pdfHandle.current) return pdfHandle.current.getVisibleText().slice(-800) ?? ''
+    return textHandle.current?.visibleText().slice(-600) ?? ''
   }
 
   const autoIntervene = async (
@@ -199,13 +215,11 @@ export function ReaderPage() {
   }
 
   const onConfused = () => {
-    const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
-    void autoIntervene('clarifier', ctx, '你主动标记了困惑', settingsRef.current.llm)
+    void autoIntervene('clarifier', visibleContext(), '你主动标记了困惑', settingsRef.current.llm)
   }
 
   const onImportant = () => {
-    const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
-    void autoIntervene('connector', ctx, '你主动标记了重要内容', settingsRef.current.llm)
+    void autoIntervene('connector', visibleContext(), '你主动标记了重要内容', settingsRef.current.llm)
   }
 
   const doAgentCall = async (agentId: AgentId, userText: string, reason?: string) => {
@@ -277,6 +291,24 @@ export function ReaderPage() {
     })
   }, [])
 
+  /** PDF 逐页文本抽取完成：缓存给代理取上下文，并扫描首页概念 */
+  const handlePdfText = useCallback(
+    (pages: string[]) => {
+      pdfTextsRef.current = pages
+      if (pages.length) scanConceptsInText(pages[0], (id) => handleConceptSeen(id), pdfSeenRef.current)
+    },
+    [handleConceptSeen]
+  )
+
+  /** PDF 滚动跨页：扫描当前页概念，让连接者也能在 PDF 中触发 */
+  const handlePdfPage = useCallback(
+    (idx: number) => {
+      const t = pdfTextsRef.current[idx]
+      if (t && t.length) scanConceptsInText(t, (id) => handleConceptSeen(id), pdfSeenRef.current)
+    },
+    [handleConceptSeen]
+  )
+
   const startTracking = async () => {
     if (!controllerRef.current) controllerRef.current = createTrackingController()
     const ctrl = controllerRef.current
@@ -296,11 +328,13 @@ export function ReaderPage() {
     }
   }
 
-  const loadSource = (src: ReaderSource) => {
+  /** 开启一次新会话并渲染内容；docId 用于把续读会话也关联回已保存文档 */
+  const startSession = (src: ReaderSource, docId?: number) => {
     setSource(src)
     setShowImport(false)
     sessionStart.current = Date.now()
     triggerRef.current.reset()
+    pdfSeenRef.current = new Set()
     void db.sessions.add({
       title: src.title,
       sourceType: src.sourceType,
@@ -308,9 +342,33 @@ export function ReaderPage() {
       durationSec: 0,
       conceptsTouched: [],
       agentInterventions: 0,
+      docId,
     }).then((id) => {
       sessionIdRef.current = id
     })
+  }
+
+  /** 保存文档到本地 IndexedDB（从历史记录可重新打开），并回填到当前会话 */
+  const loadSource = (src: ReaderSource) => {
+    startSession(src)
+    void (async () => {
+      try {
+        const pdfData =
+          src.sourceType === 'pdf' && src.file ? await src.file.arrayBuffer() : undefined
+        const docId = await saveDoc({
+          title: src.title,
+          sourceType: src.sourceType,
+          text: src.text,
+          pdfData,
+          createdAt: Date.now(),
+        })
+        if (sessionIdRef.current != null) {
+          await db.sessions.update(sessionIdRef.current, { docId })
+        }
+      } catch (e) {
+        console.error('保存文档失败', e)
+      }
+    })()
   }
 
   const saveSession = useCallback(async () => {
@@ -337,6 +395,39 @@ export function ReaderPage() {
     }
   }, [source, saveSession])
 
+  // ── 历史记录续读：从 docs 表取出已保存文档并重新开启会话 ──
+  // token 方案：effect 因依赖变化重跑时，旧异步被丢弃，只有最新一轮能完成
+  const resumeTokenRef = useRef(0)
+  useEffect(() => {
+    if (resumeDocId == null) return
+    const token = ++resumeTokenRef.current
+    let alive = true
+    void (async () => {
+      let src: ReaderSource | null = null
+      try {
+        const doc = await getDoc(resumeDocId)
+        if (!alive) return
+        if (!doc) {
+          alert('该历史记录对应的文档已不存在（本地数据可能已被清空）')
+        } else if (doc.sourceType === 'pdf') {
+          if (!doc.pdfData) alert('这份 PDF 未保存文件内容，无法重新打开')
+          else src = { title: doc.title, sourceType: 'pdf', file: new File([doc.pdfData], doc.title, { type: 'application/pdf' }) }
+        } else {
+          src = { title: doc.title, sourceType: doc.sourceType, text: doc.text ?? '' }
+        }
+      } catch (e) {
+        console.error('读取已保存文档失败', e)
+        alert('读取已保存文档失败，请重试')
+      }
+      if (!alive || token !== resumeTokenRef.current) return
+      if (src) startSession(src, resumeDocId)
+      clearResume()
+    })()
+    return () => {
+      alive = false
+    }
+  }, [resumeDocId, startSession, clearResume])
+
   return (
     <div className="reader-layout">
       <CognitiveStateRing state={state} />
@@ -344,8 +435,11 @@ export function ReaderPage() {
       <div className="reader-main">
         {source?.sourceType === 'pdf' && source.file ? (
           <PdfViewer
+            ref={pdfHandle}
             file={source.file}
             onScroll={(d) => engineRef.current.pushScroll(d)}
+            onTextReady={handlePdfText}
+            onPageChange={handlePdfPage}
           />
         ) : (
           <div className="reader-pane">
@@ -408,9 +502,8 @@ export function ReaderPage() {
                           <button
                             className="btn-primary"
                             onClick={() => {
-                              const ctx = textHandle.current?.visibleText().slice(-600) ?? ''
                               dismissNudge()
-                              void autoIntervene('clarifier', ctx, '系统主动提问：在内容上停留较久', settingsRef.current.llm)
+                              void autoIntervene('clarifier', visibleContext(), '系统主动提问：在内容上停留较久', settingsRef.current.llm)
                             }}
                           >
                             聊聊

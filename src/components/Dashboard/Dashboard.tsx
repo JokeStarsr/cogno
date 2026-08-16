@@ -7,7 +7,7 @@ import type { ReviewItem, ReadingSession } from '../../types'
 import './Dashboard.css'
 
 export function Dashboard() {
-  const { setView } = useApp()
+  const { setView, requestResume } = useApp()
   const [concepts, setConcepts] = useState<ReviewItem[]>([])
   const [due, setDue] = useState<ReviewItem[]>([])
   const [sessions, setSessions] = useState<ReadingSession[]>([])
@@ -86,11 +86,25 @@ export function Dashboard() {
           ) : (
             <ul className="dash-sessions">
               {sessions.map((s) => (
-                <li key={s.id}>
+                <li
+                  key={s.id}
+                  className="sess-item"
+                  role="button"
+                  title={s.docId != null ? '点击重新打开这篇文档继续阅读' : ''}
+                  onClick={() => {
+                    if (s.docId != null) {
+                      requestResume(s.docId)
+                      setView('reader')
+                    } else {
+                      alert('该记录来自旧版本，未保存文档内容，无法重新打开')
+                    }
+                  }}
+                >
                   <div className="sess-title">{s.title}</div>
                   <div className="sess-meta">
                     {new Date(s.startedAt).toLocaleString('zh-CN')} · {formatDuration(s.durationSec)} ·{' '}
                     {s.agentInterventions} 次代理介入
+                    {s.docId != null && <span className="sess-resume">· 可重新打开</span>}
                   </div>
                 </li>
               ))}

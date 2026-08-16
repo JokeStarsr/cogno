@@ -236,8 +236,14 @@
   align-items: center;
   padding: 16px;
   gap: 16px;
+  /* 让各页 wrapper 的 offsetTop 以滚动容器为参考（PdfViewer 页定位依赖） */
+  position: relative;
+}
+.pdf-canvas .pdf-page-wrap {
+  display: block;
 }
 .pdf-canvas canvas {
+  display: block;
   border-radius: 4px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
   background: #fff;
