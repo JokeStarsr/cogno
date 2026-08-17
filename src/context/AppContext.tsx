@@ -76,6 +76,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── 云端账号与会话（Phase 1.2/1.3）：登录后自动拉取云端数据并推送本地队列 ──
   // syncNow 不依赖 user/订阅状态，保持引用稳定——只订阅一次，杜绝重订阅循环
   const syncNow = useCallback(async () => {
+    // 最终保险：标签页不可见（切到其他页面）时一律不发起云请求，
+    // 绝不与用户正在使用的前台页面争抢网络与 CPU
+    if (document.hidden) return
     if (!syncEngine.isReady()) {
       setSyncStatus('off')
       return
@@ -124,9 +127,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [syncNow, setUser])
 
   // 定时兜底同步：登录状态下每 90s 尝试推一次队列（网络恢复/失败重试）
+  // 标签不可见时跳过（资源让给前台页面），恢复可见后下一轮自然补推
   useEffect(() => {
     if (!user) return
     const iv = setInterval(() => {
+      if (document.hidden) return
       void syncEngine.flush()
     }, 90_000)
     return () => clearInterval(iv)

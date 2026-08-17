@@ -107,6 +107,11 @@ export function ReaderPage() {
   // 阅读器保持挂载（页面切换不卸载），不在阅读视图时暂停日志写入与触发检查
   useEffect(() => {
     const iv = setInterval(() => {
+      // 标签页不可见：不推进计算/日志/触发检查，把资源让给前台页面
+      if (document.hidden) {
+        behavioralRef.current.getSnapshot() // 清空行为信号累计，恢复可见后从头计
+        return
+      }
       const active = viewRef.current === 'reader'
       // 行为信号：无论是否阅读视图都先清空累计（防堆积），阅读时推给引擎融合
       const bs = behavioralRef.current.getSnapshot()
