@@ -61,6 +61,20 @@
   background: rgba(64, 224, 208, 0.12);
 }
 
+.kdrawer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kdrawer-discipline {
+  font-size: 11px;
+  color: var(--text-faint);
+  background: rgba(64, 224, 208, 0.1);
+  border: 1px solid rgba(64, 224, 208, 0.25);
+  padding: 2px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 .kdrawer-close {
   font-size: 20px;
   color: var(--text-muted);

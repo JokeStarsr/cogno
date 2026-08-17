@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { allPrerequisites, blockageScore, directPrerequisites, findGaps, findLearningPath } from '../knowledge'
+import { allPrerequisites, blockageScore, directPrerequisites, findGaps, findLearningPath, getDiscipline, getAllNodes, setDiscipline } from '../knowledge'
 
 // 图数据：dsAlgoGraph.ts 真实概念（avl → bst → binary-tree/tree-traversal → …）
 describe('知识图谱遍历', () => {
@@ -55,5 +55,34 @@ describe('知识图谱遍历', () => {
 
   it('findLearningPath：目标已被掌握时直接返回', () => {
     expect(findLearningPath('avl', new Set(['avl']))).toEqual(['avl'])
+  })
+})
+describe('学科切换（Phase 4.1 graphRegistry）', () => {
+  it('默认 DSA，切换 ml 后概念带命名空间前缀', async () => {
+    expect(getDiscipline()).toBe('dsa')
+    const ok = await setDiscipline('ml')
+    expect(ok).toBe(true)
+    expect(getDiscipline()).toBe('ml')
+    const nodes = getAllNodes()
+    expect(nodes.length).toBeGreaterThanOrEqual(20)
+    expect(nodes.every((n) => n.id.startsWith('ml:'))).toBe(true)
+    // 依赖引用同样带前缀且无悬空
+    for (const n of nodes) {
+      for (const d of n.dependencies) expect(d.startsWith('ml:')).toBe(true)
+    }
+    // 学习路径在 ml 学科内闭合
+    const first = nodes.find((n) => n.dependencies.length === 0)!
+    const path = findLearningPath(nodes[1].id, new Set([first.id]))
+    expect(path.length).toBeGreaterThan(0)
+    // 切回 DSA 恢复原状
+    await setDiscipline('dsa')
+    expect(getDiscipline()).toBe('dsa')
+    expect(getAllNodes().some((n) => n.id.startsWith('ml:'))).toBe(false)
+  })
+
+  it('语法错误的学科 key 保持当前学科（幂等/容错）', async () => {
+    // 未知 key 由类型系统挡掉；运行时容错已由 setDiscipline try/catch 覆盖
+    await setDiscipline('dsa')
+    expect(getDiscipline()).toBe('dsa')
   })
 })

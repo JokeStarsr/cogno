@@ -1,12 +1,52 @@
-import { DS_ALGO_GRAPH, nodeById } from '../data/dsAlgoGraph'
+import { DS_ALGO_GRAPH, nodeById as dsaNodeById } from '../data/dsAlgoGraph'
+import { loadDisciplineNodes, type DisciplineKey } from './graphRegistry'
 import type { ConceptNode } from '../types'
 
+// ── 学科状态（Phase 4.1）：默认 DSA，setDiscipline 异步加载后替换快照 ──
+let currentDiscipline: DisciplineKey = 'dsa'
+let currentNodes: ConceptNode[] = DS_ALGO_GRAPH
+let currentNodeById: Map<string, ConceptNode> = dsaNodeById
+const listeners = new Set<() => void>()
+
+/** 订阅学科切换（组件用 useSyncExternalStore 读取快照） */
+export function subscribeDiscipline(fn: () => void): () => void {
+  listeners.add(fn)
+  return () => {
+    listeners.delete(fn)
+  }
+}
+
+export function getDiscipline(): DisciplineKey {
+  return currentDiscipline
+}
+
+/** 当前学科的节点集合快照（引用稳定：仅 setDiscipline 时替换） */
+export function currentNodesSnapshot(): ConceptNode[] {
+  return currentNodes
+}
+
+/** 切换学科：加载失败回退原学科，不中断阅读 */
+export async function setDiscipline(key: DisciplineKey): Promise<boolean> {
+  if (key === currentDiscipline) return true
+  try {
+    const nodes = await loadDisciplineNodes(key)
+    currentDiscipline = key
+    currentNodes = nodes
+    currentNodeById = new Map(nodes.map((n) => [n.id, n]))
+    listeners.forEach((fn) => fn())
+    return true
+  } catch (e) {
+    console.error('加载学科图谱失败，保持当前学科', e)
+    return false
+  }
+}
+
 export function getAllNodes(): ConceptNode[] {
-  return DS_ALGO_GRAPH
+  return currentNodes
 }
 
 export function getConcept(id: string): ConceptNode {
-  const n = nodeById.get(id)
+  const n = currentNodeById.get(id)
   if (!n) throw new Error(`概念不存在: ${id}`)
   return n
 }
@@ -32,12 +72,12 @@ export function allPrerequisites(id: string): Set<string> {
 /** 传递闭包：依赖该概念的全部后继（含间接） */
 export function allDependents(id: string): Set<string> {
   const out = new Set<string>()
-  const stack = DS_ALGO_GRAPH.filter((n) => n.dependencies.includes(id)).map((n) => n.id)
+  const stack = currentNodes.filter((n) => n.dependencies.includes(id)).map((n) => n.id)
   while (stack.length) {
     const cur = stack.pop()!
     if (out.has(cur)) continue
     out.add(cur)
-    for (const n of DS_ALGO_GRAPH) {
+    for (const n of currentNodes) {
       if (n.dependencies.includes(cur)) stack.push(n.id)
     }
   }

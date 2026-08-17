@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useApp } from '../../context/AppContext'
 import { AGENTS } from '../../lib/agents'
 import { baselineStatus } from '../../lib/readingSignals'
 import { db } from '../../lib/storage'
 import { chatCompletion, friendlyFailure, isLLMConfigured, LLMError } from '../../lib/llm'
+import { DISCIPLINES, type DisciplineKey } from '../../lib/graphRegistry'
+import { currentNodesSnapshot, getDiscipline, setDiscipline, subscribeDiscipline } from '../../lib/knowledge'
 import { DataControls } from './DataControls'
 import type { AgentId } from '../../types'
 import './SettingsPanel.css'
@@ -56,6 +58,10 @@ function buildForm(s: ReturnType<typeof useApp>['settings']): SettingsForm {
 export function SettingsPanel() {
   const { settings, updateSettings } = useApp()
   const [saved, setSaved] = useState(false)
+  /** 学科图谱（Phase 4.1）：跟随 knowledge 模块状态，切换即生效（订阅驱动重渲染） */
+  const discipline = useSyncExternalStore(subscribeDiscipline, getDiscipline)
+  const disciplineNodes = useSyncExternalStore(subscribeDiscipline, currentNodesSnapshot)
+  const [disciplineError, setDisciplineError] = useState('')
   // A/B 实验分组展示（Phase 2.2）：对照组 = 四代理不自动介入
   const experimentBucket = (
     typeof localStorage !== 'undefined' ? localStorage.getItem('cogno.experiment') : null
@@ -219,6 +225,36 @@ export function SettingsPanel() {
         <p className="set-note">
           测试只发一个最小请求（约 10 token），用来验证 Base URL / Key / 模型是否可用，并
           及时识别"余额不足 / 无可用账户 / 限流"。
+        </p>
+      </section>
+
+      <section className="set-section panel">
+        <h2>学科图谱</h2>
+        <p className="set-note">
+          阅读时概念扫描、理解网格、知识缺口都基于当前学科。切换后立即生效（非当前学科的图谱按需加载）。
+        </p>
+        <div className="set-row">
+          <label>当前学科</label>
+          <select
+            className="input"
+            value={discipline}
+            onChange={async (e) => {
+              setDisciplineError('')
+              const ok = await setDiscipline(e.target.value as DisciplineKey)
+              if (!ok) setDisciplineError('图谱加载失败，已保持当前学科')
+            }}
+          >
+            {DISCIPLINES.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {disciplineError && <p className="set-test err">{disciplineError}</p>}
+        <p className="set-note">
+          当前「{DISCIPLINES.find((d) => d.key === discipline)?.name}」共 {disciplineNodes.length} 个概念。
+          {discipline === 'dsa' ? '数据结构与算法为内置学科，离线可用。' : ''}
         </p>
       </section>
 

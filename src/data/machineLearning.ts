@@ -2,7 +2,7 @@
 // 学科：机器学习，章节：监督学习、无监督学习、深度学习、强化学习
 import type { ConceptNode } from '../types'
 
-export const 机器学习_GRAPH: ConceptNode[] = [
+export const MACHINE_LEARNING_GRAPH: ConceptNode[] = [
   { id: 'machine-learning-basics', label: '机器学习基础', description: '研究计算机从数据中自动学习规律的学科', domain: '通用', dependencies: [], difficulty: 1 },
   { id: 'data-preprocessing', label: '数据预处理', description: '对原始数据进行清洗、转换和特征工程', domain: '通用', dependencies: [], difficulty: 1 },
   { id: 'loss-function', label: '损失函数', description: '衡量模型预测值与真实值差异的函数', domain: '通用', dependencies: [], difficulty: 1 },

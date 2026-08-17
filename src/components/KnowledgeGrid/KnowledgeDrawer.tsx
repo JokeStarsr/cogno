@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
-import { getAllNodes, getConcept, findGaps, findLearningPath, blockageScore } from '../../lib/knowledge'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { getAllNodes, getConcept, findGaps, findLearningPath, blockageScore, subscribeDiscipline, currentNodesSnapshot, getDiscipline } from '../../lib/knowledge'
+import { disciplineName } from '../../lib/graphRegistry'
 import type { Mastery } from '../../types'
 import { GridCanvas } from './GridCanvas'
 import './KnowledgeDrawer.css'
@@ -17,6 +18,17 @@ export function KnowledgeDrawer({ open, mastery, onClose, onGoReview }: Props) {
   const [tab, setTab] = useState<Tab>('grid')
   const [focusId, setFocusId] = useState<string | null>(null)
   const [gapTarget, setGapTarget] = useState<string>('dp-basics')
+  // 学科切换驱动（Phase 4.1）：当前图谱变化时刷新网格与缺口
+  const discipline = useSyncExternalStore(subscribeDiscipline, getDiscipline)
+  const nodes = useSyncExternalStore(subscribeDiscipline, currentNodesSnapshot)
+  // 目标概念随学科变化兜底：切学科后旧 id 不存在则回落到首个节点
+  useEffect(() => {
+    if (gapTarget && !nodes.some((n) => n.id === gapTarget)) {
+      setGapTarget(nodes[0]?.id ?? '')
+    }
+    setFocusId(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discipline, nodes])
   const [path, setPath] = useState<string[]>([])
 
   const masteredIds = useMemo(() => {
@@ -60,9 +72,12 @@ export function KnowledgeDrawer({ open, mastery, onClose, onGoReview }: Props) {
             知识缺口
           </button>
         </div>
-        <button className="kdrawer-close" onClick={onClose}>
-          ×
-        </button>
+        <div className="kdrawer-right">
+          <span className="kdrawer-discipline">{disciplineName(discipline)}</span>
+          <button className="kdrawer-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
       </div>
 
       {tab === 'grid' && (

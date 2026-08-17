@@ -9,3 +9,5 @@ npm-debug.log*
 preview*.log
 
 dist-bundle.tar.gz
+
+docs/*.secret.txt
