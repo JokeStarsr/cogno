@@ -8,8 +8,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 const URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim()
 const KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim()
 
-export const supabase: SupabaseClient | null =
-  URL && KEY ? createClient(URL, KEY) : null
+export const supabase: SupabaseClient | null = URL && KEY ? createClient(URL, KEY) : null
 
 /** 云端是否已启用（构建期内恒定的布尔，前端据此显示"同步"入口与提示） */
 export const isCloudEnabled = supabase != null

@@ -17,6 +17,22 @@ const NAV: { id: ViewId; label: string }[] = [
 
 /** 三页全部保持挂载，用 CSS 显隐切换：
  *  阅读中途去设置/回概览，会话、AI 对话、滚动位置与眼动追踪都不中断 */
+/** PWA 新版本就绪横幅：一键刷新获取更新，无需清理浏览器数据 */
+function SwUpdateBanner() {
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    const onUpdate = () => setReady(true)
+    window.addEventListener('cogno-sw-update', onUpdate)
+    return () => window.removeEventListener('cogno-sw-update', onUpdate)
+  }, [])
+  if (!ready) return null
+  return (
+    <button className="offline-banner sw-banner" onClick={() => location.reload()}>
+      🔄 检测到新版本，点击这里刷新获取（当前会话数据已本地保存，不会丢失）
+    </button>
+  )
+}
+
 /** Phase 3.3：离线横幅——阅读本地数据仍可用，联网后自动恢复 */
 function OfflineBanner() {
   const [offline, setOffline] = useState(!navigator.onLine)
@@ -75,6 +91,7 @@ export default function App() {
   return (
     <PrivacyConsent>
     <OfflineBanner />
+    <SwUpdateBanner />
     <div className="app-shell">
       <nav className="top-nav">
         <div className="brand">

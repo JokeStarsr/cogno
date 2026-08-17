@@ -37,6 +37,9 @@ function cloudKey(table: SyncTable, data: Record<string, unknown>): string {
 
 const QUEUE_KEY = 'cogno.syncQueue'
 const MAX_QUEUE = 500
+/** 单条推送超时：国内→新加坡线路抖动时，挂死请求会占住浏览器连接，
+ *  配合 flush 互斥锁与失败退避，从根上杜绝 ERR_INSUFFICIENT_RESOURCES */
+const PUSH_TIMEOUT_MS = 10_000
 
 function loadQueue(): SyncOp[] {
   try {
@@ -63,6 +66,11 @@ export class SyncEngine {
   /** 认知日志同步窗口：距上次成功入队不足 30s 的同类样本跳过（只推聚合密度 30s 一条） */
   private lastLogEnqueuedAt = 0
   private static LOG_SYNC_WINDOW_MS = 30_000
+  /** flush 互斥锁：多个触发源（90s 定时/登录/手动）并发推同一批条目，
+   *  会向慢速网络堆积并发请求直至浏览器资源耗尽（ERR_INSUFFICIENT_RESOURCES） */
+  private flushing = false
+  /** 单条失败退避：连续失败 n 次的条目本轮跳过，避免死循环重试 */
+  private failCounts = new Map<string, number>()
 
   constructor(client: SupabaseClient | null = defaultClient, dbInstance: typeof defaultDb = defaultDb) {
     this.client = client
@@ -99,29 +107,54 @@ export class SyncEngine {
     return loadQueue().length
   }
 
-  /** 消费队列：逐条推云端；失败保留（下次 flush 重试）；成功移除。网络异常静默不抛错。 */
+  /** 消费队列：逐条推云端；失败保留（下次 flush 重试）；成功移除。网络异常静默不抛错。
+ *  互斥：同进程并发的多次 flush 只有第一轮真正执行，其余直接返回（防连接堆积）。 */
   async flush(): Promise<{ pushed: number; remaining: number }> {
+    if (this.flushing) return { pushed: 0, remaining: this.pendingCount() }
     if (!this.client) return { pushed: 0, remaining: this.pendingCount() }
     const { data: sessionData } = await this.client.auth.getSession()
     if (!sessionData.session) return { pushed: 0, remaining: this.pendingCount() }
 
-    const q = loadQueue()
-    const kept: SyncOp[] = []
-    let pushed = 0
-    for (const op of q) {
-      const { error } = await this.pushOne(op)
-      if (error) {
-        kept.push(op) // 失败保留，等下次 flush
-      } else {
-        pushed++
+    this.flushing = true
+    try {
+      const q = loadQueue()
+      const kept: SyncOp[] = []
+      let pushed = 0
+      for (const op of q) {
+        // 连续失败 ≥5 次的条目暂时跳过（退避期），防弱网下反复挂起的重试风暴
+        const fails = this.failCounts.get(op.id) ?? 0
+        if (fails >= 5) {
+          kept.push(op)
+          continue
+        }
+        const { error } = await this.pushOne(op)
+        if (error) {
+          this.failCounts.set(op.id, fails + 1)
+          kept.push(op) // 失败保留，等下次 flush
+        } else {
+          this.failCounts.delete(op.id)
+          pushed++
+        }
       }
+      const remaining = kept.length
+      saveQueue(kept)
+      return { pushed, remaining }
+    } finally {
+      this.flushing = false
     }
-    const remaining = kept.length
-    saveQueue(kept)
-    return { pushed, remaining }
   }
 
   private async pushOne(op: SyncOp): Promise<{ error: unknown }> {
+    // 超时保护：push 挂超 10s 按失败处理（队列保留，下次重试）
+    return Promise.race([
+      this.pushOneInner(op),
+      new Promise<{ error: unknown }>((resolve) =>
+        setTimeout(() => resolve({ error: new Error('push timeout') }), PUSH_TIMEOUT_MS)
+      ),
+    ])
+  }
+
+  private async pushOneInner(op: SyncOp): Promise<{ error: unknown }> {
     try {
       if (op.table === 'review_items') {
         // 唯一键 (user_id, concept_id) 由表约束保证，upsert 天然 last-write-wins
