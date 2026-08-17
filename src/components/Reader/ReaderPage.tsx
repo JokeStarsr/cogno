@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { CognitiveEngine } from '../../lib/cognitive'
 import { BehavioralSignalTracker } from '../../lib/behavioralSignals'
@@ -24,6 +24,7 @@ import { CalibrationOverlay } from './CalibrationOverlay'
 import { AgentPanel, type AgentTurn } from '../AgentPanel/AgentPanel'
 import { KnowledgeDrawer } from '../KnowledgeGrid/KnowledgeDrawer'
 import { ReviewOverlay } from './ReviewOverlay'
+import { QuizOverlay } from './QuizOverlay'
 import type { AgentId, ChatMessage, CognitiveState, Mastery, ReadingDoc } from '../../types'
 import './ReaderPage.css'
 
@@ -50,9 +51,14 @@ export function ReaderPage() {
   const [calibrating, setCalibrating] = useState(false)
   const [trackingLabel, setTrackingLabel] = useState('眼动未启用')
   const [state, setState] = useState<CognitiveState>(DEFAULT_STATE)
+  /** 续读 PDF 时带入已保存的逐页文本（含上次 OCR 结果，避免重复识别） */
+  const [pdfInitialTexts, setPdfInitialTexts] = useState<string[] | undefined>(undefined)
+  /** 当前会话关联的 docs 表行（OCR 文本回写用），loadSource/resume 路径设置 */
+  const docIdRef = useRef<number | null>(null)
   const [kdrawerOpen, setKdrawerOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
+  const [quizOpen, setQuizOpen] = useState(false)
   const [activeAgent, setActiveAgent] = useState<AgentId>('clarifier')
   const [turns, setTurns] = useState<AgentTurn[]>([])
   const turnsRef = useRef<AgentTurn[]>([])
@@ -378,11 +384,17 @@ export function ReaderPage() {
     signalRef.current.setTextScroll(scrollTop, viewportH)
   }, [])
 
-  /** PDF 逐页文本抽取完成：缓存给代理取上下文，并扫描首页概念 */
+  /** PDF 逐页文本就绪/更新（含 OCR 回填）：缓存给代理取上下文、扫描首页概念、
+   *  并把结果回写 docs（OCR 结果本地持久化，下次打开秒出） */
   const handlePdfText = useCallback(
     (pages: string[]) => {
       pdfTextsRef.current = pages
       if (pages.length) scanConceptsInText(pages[0], (id) => handleConceptSeen(id), pdfSeenRef.current)
+      if (docIdRef.current != null) {
+        void db.docs.update(docIdRef.current, { pdfTexts: pages }).catch((e) => {
+          console.error('保存 PDF 文本失败', e)
+        })
+      }
     },
     [handleConceptSeen]
   )
@@ -445,6 +457,7 @@ export function ReaderPage() {
   /** 保存文档到本地 IndexedDB（从历史记录可重新打开），并回填到当前会话 */
   const loadSource = (src: ReaderSource) => {
     startSession(src)
+    setPdfInitialTexts(undefined) // 新导入不继承旧 OCR 文本
     void (async () => {
       try {
         const pdfData =
@@ -456,6 +469,7 @@ export function ReaderPage() {
           pdfData,
           createdAt: Date.now(),
         })
+        docIdRef.current = docId
         if (sessionIdRef.current != null) {
           await db.sessions.update(sessionIdRef.current, { docId })
         }
@@ -536,6 +550,9 @@ export function ReaderPage() {
           src.sourceType === 'pdf'
             ? { page: doc?.lastPage && doc.lastPage > 0 ? doc.lastPage : 0 }
             : { scrollTop: doc?.lastScrollTop ?? 0 }
+        // 续读 PDF：带回已保存的逐页文本（含上次 OCR 结果）
+        if (src.sourceType === 'pdf') setPdfInitialTexts(doc?.pdfTexts ? [...doc.pdfTexts] : undefined)
+        docIdRef.current = resumeDocId
         startSession(src, resumeDocId)
       }
       clearResume()
@@ -545,107 +562,120 @@ export function ReaderPage() {
     }
   }, [resumeDocId, startSession, clearResume])
 
+  /** 测评候选：当前已扫到且掌握度 < 2 的概念（LLM 出题成本低，全量也无妨） */
+  const quizCandidates = useMemo(
+    () =>
+      [...mastery]
+        .filter(([, m]) => m < 2)
+        .map(([id]) => ({ id, label: safeLabel(id) })),
+    [mastery]
+  )
+
   return (
     <div className="reader-layout">
       <CognitiveStateRing state={state} />
 
       <div className="reader-main">
-        {source?.sourceType === 'pdf' && source.file ? (
-          <PdfViewer
-            ref={pdfHandle}
-            file={source.file}
-            onScroll={handleScrollDelta}
-            onTextReady={handlePdfText}
-            onPageChange={handlePdfPage}
-            initialPage={resumePosRef.current?.page ?? 0}
-          />
-        ) : (
-          <div className="reader-pane">
-            <div className="reader-toolbar">
-              <div className="reader-title">
-                <span className="reader-title-text">{source?.title ?? '未加载'}</span>
-                <span className="reader-mode">{trackingLabel}</span>
-              </div>
-              <div className="reader-buttons">
-                {!source && (
-                  <button className="btn-ghost" onClick={() => setShowImport(true)}>
-                    导入内容
-                  </button>
-                )}
-                <button className="btn-ghost" onClick={() => setShowImport(true)}>
-                  换一篇
-                </button>
-                <button className="btn-ghost" onClick={startTracking}>
-                  {trackingLabel.startsWith('眼动') ? '校准眼动' : '启用眼动'}
-                </button>
-                <button
-                  className={`btn-ghost ${kdrawerOpen ? 'active' : ''}`}
-                  onClick={() => setKdrawerOpen((v) => !v)}
-                >
-                  理解网格
-                </button>
-                <button
-                  className={`btn-ghost ${agentOpen ? 'active' : ''}`}
-                  onClick={() => setAgentOpen((v) => !v)}
-                >
-                  苏格拉底
-                </button>
-                <button className="btn-ghost" onClick={() => setReviewOpen(true)}>
-                  回顾
-                </button>
-              </div>
+        <div className="reader-pane">
+          <div className="reader-toolbar">
+            <div className="reader-title">
+              <span className="reader-title-text">{source?.title ?? '未加载'}</span>
+              <span className="reader-mode">{trackingLabel}</span>
             </div>
-            <div className="reader-body">
-              {source ? (
-                source.sourceType === 'pdf' && source.file ? null : (
-                  <>
-                    <TextViewer
-                      ref={textHandle}
-                      text={source.text ?? ''}
-                      onScroll={handleScrollDelta}
-                      onVirtualScroll={handleVirtualScroll}
-                      onConceptSeen={handleConceptSeen}
-                      initialScrollTop={resumePosRef.current?.scrollTop ?? 0}
-                    />
-                    <div className="reader-feedback">
-                      <button className="feedback-btn confused" onClick={onConfused}>
-                        我困惑了
-                      </button>
-                      <button className="feedback-btn important" onClick={onImportant}>
-                        这里很重要
-                      </button>
-                    </div>
-                    {nudge && (
-                      <div className="reader-nudge">
-                        <p>{nudge}</p>
-                        <div className="nudge-actions">
-                          <button
-                            className="btn-primary"
-                            onClick={() => {
-                              dismissNudge()
-                              void autoIntervene('clarifier', visibleContext(), '系统主动提问：在内容上停留较久', settingsRef.current.llm)
-                            }}
-                          >
-                            聊聊
-                          </button>
-                          <button className="btn-ghost" onClick={dismissNudge}>
-                            忽略
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )
-              ) : (
-                <div className="reader-empty" onClick={() => setShowImport(true)}>
-                  <div className="reader-empty-orb" />
-                  <p>选择一篇文章开始阅读 —— 摄像头会感知你的认知状态</p>
-                  <button className="btn-primary">开始</button>
-                </div>
+            <div className="reader-buttons">
+              {!source && (
+                <button className="btn-ghost" onClick={() => setShowImport(true)}>
+                  导入内容
+                </button>
               )}
+              <button className="btn-ghost" onClick={() => setShowImport(true)}>
+                换一篇
+              </button>
+              <button className="btn-ghost" onClick={startTracking}>
+                {trackingLabel.startsWith('眼动') ? '校准眼动' : '启用眼动'}
+              </button>
+              <button
+                className={`btn-ghost ${kdrawerOpen ? 'active' : ''}`}
+                onClick={() => setKdrawerOpen((v) => !v)}
+              >
+                理解网格
+              </button>
+              <button
+                className={`btn-ghost ${agentOpen ? 'active' : ''}`}
+                onClick={() => setAgentOpen((v) => !v)}
+              >
+                苏格拉底
+              </button>
+              <button className="btn-ghost" onClick={() => setReviewOpen(true)}>
+                回顾
+              </button>
+              <button className={`btn-ghost ${quizOpen ? 'active' : ''}`} onClick={() => setQuizOpen((v) => !v)}>
+                测评
+              </button>
             </div>
           </div>
-        )}
+          <div className="reader-body">
+            {source ? (
+              source.sourceType === 'pdf' && source.file ? (
+                <PdfViewer
+                  ref={pdfHandle}
+                  file={source.file}
+                  onScroll={handleScrollDelta}
+                  onTextReady={handlePdfText}
+                  onPageChange={handlePdfPage}
+                  initialPage={resumePosRef.current?.page ?? 0}
+                  initialTexts={pdfInitialTexts}
+                />
+              ) : (
+                <TextViewer
+                  ref={textHandle}
+                  text={source.text ?? ''}
+                  onScroll={handleScrollDelta}
+                  onVirtualScroll={handleVirtualScroll}
+                  onConceptSeen={handleConceptSeen}
+                  initialScrollTop={resumePosRef.current?.scrollTop ?? 0}
+                />
+              )
+            ) : (
+              <div className="reader-empty" onClick={() => setShowImport(true)}>
+                <div className="reader-empty-orb" />
+                <p>选择一篇文章开始阅读 —— 摄像头会感知你的认知状态</p>
+                <button className="btn-primary">开始</button>
+              </div>
+            )}
+            {source && (
+              <>
+                <div className="reader-feedback">
+                  <button className="feedback-btn confused" onClick={onConfused}>
+                    我困惑了
+                  </button>
+                  <button className="feedback-btn important" onClick={onImportant}>
+                    这里很重要
+                  </button>
+                </div>
+                {nudge && (
+                  <div className="reader-nudge">
+                    <p>{nudge}</p>
+                    <div className="nudge-actions">
+                      <button
+                        className="btn-primary"
+                        onClick={() => {
+                          dismissNudge()
+                          void autoIntervene('clarifier', visibleContext(), '系统主动提问：在内容上停留较久', settingsRef.current.llm)
+                        }}
+                      >
+                        聊聊
+                      </button>
+                      <button className="btn-ghost" onClick={dismissNudge}>
+                        忽略
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {agentOpen && (
@@ -683,6 +713,14 @@ export function ReaderPage() {
       )}
 
       {showImport && <ImportPanel onLoad={loadSource} onClose={() => setShowImport(false)} />}
+
+      <QuizOverlay
+        open={quizOpen}
+        candidates={quizCandidates}
+        cfg={settings.llm}
+        fastModel={settings.fastModel}
+        onClose={() => setQuizOpen(false)}
+      />
 
       {calibrating && (
         <CalibrationOverlay

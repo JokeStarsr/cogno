@@ -1,6 +1,7 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { renderPageToCanvas, recognizePage } from '../../lib/ocr'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -13,16 +14,20 @@ export interface PdfHandle {
 interface Props {
   file: File
   onScroll?: (deltaPx: number) => void
-  /** PDF 逐页文本抽取完成（代理上下文 + 概念检测用） */
+  /** PDF 逐页文本就绪/更新（代理上下文 + 概念检测 + OCR 逐页回填都用它） */
   onTextReady?: (pages: string[]) => void
   /** 滚动跨越页面时上报当前页索引（0-based） */
   onPageChange?: (pageIndex: number) => void
   /** 续读恢复：加载完成后跳转到的页索引（0-based），默认 0 */
   initialPage?: number
+  /** 续读恢复：已保存的逐页文本（含上次 OCR 结果），跳过重复识别 */
+  initialTexts?: string[]
 }
 
 /** 视口外缓冲页数：渲染范围 = 当前页 ±CHUNK */
 const CHUNK = 2
+/** OCR 渲染放大倍数（扫描件清晰度不足时识别更稳） */
+const OCR_SCALE = 2
 
 /**
  * 一页 PDF：仅当进入视口缓冲范围才渲染 canvas；
@@ -77,7 +82,10 @@ function PdfPage({ page, scale, visible }: { page: pdfjsLib.PDFPageProxy; scale:
 }
 
 export const PdfViewer = memo(
-  forwardRef<PdfHandle, Props>(function PdfViewer({ file, onScroll, onTextReady, onPageChange, initialPage = 0 }, ref) {
+  forwardRef<PdfHandle, Props>(function PdfViewer(
+    { file, onScroll, onTextReady, onPageChange, initialPage = 0, initialTexts },
+    ref
+  ) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [state, setState] = useState<{ loading: boolean; error: string; pages: number }>({
       loading: true,
@@ -89,10 +97,16 @@ export const PdfViewer = memo(
     const [pageProxies, setPageProxies] = useState<pdfjsLib.PDFPageProxy[]>([])
     /** 可视缓冲范围 [start, end]（仅这些页渲染） */
     const [range, setRange] = useState<[number, number]>([0, CHUNK])
-    /** 整本 PDF 都抽不出文本（图片扫描件无文本层） */
-    const [noText, setNoText] = useState(false)
+    /** 整本缺文本层（扫描件）时的 OCR 进度；idle = 未开始 */
+    const [ocr, setOcr] = useState<{ running: boolean; done: number; total: number; pageProgress: number; error: string }>(
+      { running: false, done: 0, total: 0, pageProgress: 0, error: '' }
+    )
     const pageTextsRef = useRef<string[]>([])
     const lastPageRef = useRef(-1)
+    /** OCR 回填的页文本（与抽取文本合并后的全量数组） */
+    const ocrSessionCacheRef = useRef<string[] | null>(null)
+    /** OCR 循环取消令牌：换文件/卸载/跳过后 +1 使循环中止 */
+    const ocrTokenRef = useRef(0)
     /** 页偏移缓存：滚动每秒触发数十次，读 offsetTop 会强制同步重排（layout thrashing）
      *  是 PDF 滚动卡顿的主因之一——页顶相对容器不变，按子元素数量失效即可 */
     const topsCacheRef = useRef<number[] | null>(null)
@@ -151,15 +165,62 @@ export const PdfViewer = memo(
       setRange((prev) => (prev[0] === s && prev[1] === e ? prev : [s, e]))
     }, [getPageTops])
 
+    /** 扫描件 OCR 起跑：把"缺文本"的页逐页识别后回填 */
+    const startOcr = useCallback(
+      (d: pdfjsLib.PDFDocumentProxy, pages: string[]) => {
+        const missing: number[] = []
+        for (let i = 0; i < pages.length; i++) if (!pages[i]) missing.push(i)
+        if (!missing.length) return
+        const token = ++ocrTokenRef.current
+        setOcr({ running: true, done: 0, total: missing.length, pageProgress: 0, error: '' })
+        void (async () => {
+          let done = 0
+          for (const idx of missing) {
+            if (ocrTokenRef.current !== token) return
+            try {
+              const p = await d.getPage(idx + 1)
+              const canvas = await renderPageToCanvas(p, OCR_SCALE)
+              const text = await recognizePage(canvas, (prog) => {
+                if (ocrTokenRef.current === token) setOcr((o) => ({ ...o, pageProgress: prog }))
+              })
+              const next = [...pages]
+              next[idx] = text
+              pages = next
+              pageTextsRef.current = next
+              ocrSessionCacheRef.current = next
+              // 逐页回填：概念扫描与代理解说立刻能看到新识别内容
+              onTextReady?.(next)
+              done++
+              setOcr((o) => ({ ...o, done, pageProgress: 0 }))
+            } catch (e) {
+              console.error('OCR 第', idx + 1, '页失败', e)
+              setOcr((o) => ({
+                ...o,
+                error: e instanceof Error ? e.message : 'OCR 识别失败',
+                running: false,
+              }))
+              return
+            }
+          }
+          setOcr((o) => ({ ...o, running: false }))
+        })()
+      },
+      [onTextReady]
+    )
+
     // 加载文档（幂等，重载时先摧毁旧文档）
     useEffect(() => {
       let alive = true
       let task: ReturnType<typeof pdfjsLib.getDocument> | null = null
       setState({ loading: true, error: '', pages: 0 })
-      setNoText(false)
+      setOcr({ running: false, done: 0, total: 0, pageProgress: 0, error: '' })
       setPageProxies([])
       setRange([0, CHUNK])
+      ocrTokenRef.current++ // 中断上一份文档的 OCR 循环
+      // 续读恢复：先用已保存文本（含上次 OCR 结果）填充，新抽取/OCR 只补缺页
+      const seeded: string[] = initialTexts?.length ? [...initialTexts] : []
       pageTextsRef.current = []
+      ocrSessionCacheRef.current = null
       lastPageRef.current = -1
       const load = async () => {
         try {
@@ -191,9 +252,9 @@ export const PdfViewer = memo(
           // 后台抽取逐页文本（渲染先行，不阻塞首屏）
           void (async () => {
             const texts: string[] = []
-            for (let i = 1; i <= d.numPages && alive; i++) {
+            for (let i = 0; i < d.numPages && alive; i++) {
               try {
-                const p = await d.getPage(i)
+                const p = await d.getPage(i + 1)
                 const tc = await p.getTextContent()
                 texts.push(tc.items.map((it) => ((it as { str?: string }).str ?? '')).join(''))
               } catch {
@@ -201,11 +262,23 @@ export const PdfViewer = memo(
               }
             }
             if (!alive) return
-            pageTextsRef.current = texts
-            onTextReady?.(texts)
-            const scanned = texts.length > 0 && !texts.some((t) => t.length > 0)
-            setNoText(scanned)
-            if (scanned) console.warn('PDF 未抽取到文本（可能是扫描件）')
+            // 合并续读存的旧文本：只保留文本层未能提供的那部分页
+            const merged = seeded.map((t, i) => texts[i] ?? t)
+            // 缺失页补 seeded（新文档则整数组为抽取结果）
+            const pagesMerged = texts.length > 0 ? merged : seeded
+            pagesMerged.length = d.numPages
+            pageTextsRef.current = pagesMerged
+            ocrSessionCacheRef.current = pagesMerged
+            onTextReady?.(pagesMerged)
+            const missingCount = pagesMerged.filter((t) => !t).length
+            const allEmpty = missingCount === pagesMerged.length
+            if (allEmpty) {
+              // 整本无文本层：启动 OCR（扫描件也能读）
+              startOcr(d, pagesMerged)
+            } else if (missingCount > 0) {
+              // 混排文档：文本层缺页也 OCR 补上
+              startOcr(d, pagesMerged)
+            }
           })()
         } catch (e) {
           if (alive) setState({ loading: false, error: (e as Error).message, pages: 0 })
@@ -214,6 +287,7 @@ export const PdfViewer = memo(
       void load()
       return () => {
         alive = false
+        ocrTokenRef.current++
         task?.destroy()
         doc?.destroy()
       }
@@ -257,7 +331,6 @@ export const PdfViewer = memo(
     return (
       <div className="pdf-viewer">
         <div className="pdf-toolbar">
-          <span>{file.name}</span>
           <div>
             <button className="btn-ghost" onClick={() => setScale((s) => Math.max(0.8, s - 0.2))}>
               −
@@ -271,9 +344,30 @@ export const PdfViewer = memo(
         <div ref={scrollRef} className="pdf-canvas" onScroll={handleScroll}>
           {state.loading && <div className="pdf-hint">正在加载 PDF…</div>}
           {state.error && <div className="pdf-hint error">PDF 解析失败：{state.error}</div>}
-          {noText && (
-            <div className="pdf-hint">
-              这是图片扫描件，PDF 中没有可抽取的文本层，AI 角色看不到内容——建议换文字版 PDF，或复制正文粘贴到文本模式阅读
+          {ocr.running && (
+            <div className="pdf-hint ocr">
+              <span>
+                {ocr.total > 0
+                  ? `扫描件 OCR 识别中：${ocr.done}/${ocr.total} 页完成，本页 ${Math.round(ocr.pageProgress * 100)}%`
+                  : '准备 OCR…'}
+              </span>
+              <span className="ocr-sub">
+                首次识别需加载中英文模型（约 13MB），识别结果自动保存，下次打开即时可用
+              </span>
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  ocrTokenRef.current++
+                  setOcr((o) => ({ ...o, running: false }))
+                }}
+              >
+                跳过
+              </button>
+            </div>
+          )}
+          {ocr.error && !ocr.running && (
+            <div className="pdf-hint error">
+              扫描件 OCR 不可用：{ocr.error}。可换文字版 PDF，或复制正文粘贴到文本模式。
             </div>
           )}
           {pageProxies.map((p, i) => (

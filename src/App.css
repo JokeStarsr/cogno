@@ -101,6 +101,25 @@
   }
 }
 
+/* Phase 3.4：480px 竖屏导航压缩 + 触控目标放大 */
+@media (max-width: 480px) {
+  .top-nav {
+    gap: 6px;
+    padding: 6px 10px;
+  }
+  .brand-name {
+    font-size: 13px;
+  }
+  .nav-link {
+    min-height: 40px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  .account-email {
+    max-width: 90px;
+  }
+}
+
 /* Phase 3.3 离线横幅：页面顶部通栏，黄色警示 */
 .offline-banner {
   position: sticky;

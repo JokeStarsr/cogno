@@ -174,6 +174,24 @@
   }
 }
 
+/* Phase 3.4：480px 竖屏时苏格拉底面板贴边成底部弹层 */
+@media (max-width: 480px) {
+  .agent-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: min(62vh, 520px);
+    border-radius: 16px 16px 0 0;
+  }
+  .agent-input .input {
+    min-height: 44px;
+  }
+  .agent-input .btn-primary {
+    min-height: 44px;
+  }
+}
+
 .agent-input {
   display: flex;
   gap: 8px;

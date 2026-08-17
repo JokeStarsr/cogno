@@ -67,6 +67,13 @@
   min-height: 0;
   overflow: hidden;
   position: relative;
+  /* PDF 与文本两种阅读器共用此容器：让子阅读器填满高度 */
+  display: flex;
+  flex-direction: column;
+}
+.reader-body > .text-viewer {
+  height: auto;
+  flex: 1;
 }
 
 /* 文本阅读区 */
@@ -250,9 +257,8 @@
 .pdf-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  justify-content: flex-end;
+  padding: 4px 12px;
   font-size: 14px;
 }
 .pdf-scale {
@@ -284,9 +290,27 @@
 .pdf-hint {
   padding: 40px;
   color: var(--text-faint);
+  text-align: center;
 }
 .pdf-hint.error {
   color: var(--agent-challenger);
+}
+/* 扫描件 OCR 进度横幅 */
+.pdf-hint.ocr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+.pdf-hint.ocr .ocr-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  max-width: 420px;
+}
+.pdf-hint.ocr button {
+  font-size: 12px;
+  padding: 4px 14px;
 }
 
 /* 导入弹窗 */
@@ -541,5 +565,43 @@
   }
   .reader-feedback {
     bottom: 12px;
+  }
+}
+
+/* Phase 3.4 移动端：480px 竖屏紧凑化（在 720 折线之上进一步收窄） */
+@media (max-width: 480px) {
+  .reader-body > .text-viewer {
+    padding: 14px 12px;
+  }
+  .tv-inner {
+    font-size: 15px;
+    line-height: 1.9;
+  }
+  /* 触摸目标 ≥ 40px，避免小屏误触 */
+  .reader-buttons .btn-ghost {
+    min-height: 40px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  .feedback-btn {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .pdf-canvas {
+    padding: 8px 4px;
+    gap: 10px;
+  }
+  .pdf-hint {
+    padding: 20px 12px;
+  }
+  .reader-empty {
+    padding: 20px 16px;
+  }
+}
+
+/* Phase 3.4 平板：阅读区留白加宽，呈现更从容 */
+@media (min-width: 481px) and (max-width: 1024px) {
+  .reader-body > .text-viewer {
+    padding: 24px 32px;
   }
 }
