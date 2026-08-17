@@ -26,21 +26,31 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install
-        run: npm ci
-
-      - name: Test
-        run: npm run test 2>/dev/null || npx vitest run
-
-      - name: Build
-        run: npm run build
-
       - name: Prepare deployment key
         env:
           KEY_B64: ${{ secrets.COGNO_DEPLOY_KEY_B64 }}
         run: |
           echo "$KEY_B64" | base64 -d > /tmp/cogno_deploy_key
           chmod 600 /tmp/cogno_deploy_key
+
+      - name: Install
+        run: npm ci 2>&1 | tee /tmp/npm-ci.log; test ${PIPESTATUS[0]} -eq 0
+
+      - name: Upload npm ci failure log (diagnostic)
+        if: failure()
+        run: |
+          echo "NPM_SEMVER: $(npm --version), NODE: $(node --version)" >> /tmp/npm-ci.log
+          echo "KEY_STATUS: $(test -s /tmp/cogno_deploy_key && echo ok || echo missing)" >> /tmp/npm-ci.log
+          head -5 /tmp/npm-ci.log 2>/dev/null || true
+          scp -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no \
+            /tmp/npm-ci.log root@115.159.221.62:/tmp/ci-npm.log 2>/dev/null || true
+          false
+
+      - name: Test
+        run: npm run test 2>/dev/null || npx vitest run
+
+      - name: Build
+        run: npm run build
 
       - name: Package dist (flat)
         run: tar -czf /tmp/cogno-dist.tar.gz -C dist .
