@@ -48,15 +48,19 @@ jobs:
           scp -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no \
             /tmp/cogno-dist.tar.gz root@115.159.221.62:/tmp/cogno-dist.tar.gz
 
-      - name: Deploy & health check
+      - name: Deploy & health check (atomic switch)
         run: |
           ssh -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no root@115.159.221.62 '
             set -e
-            mkdir -p /www/wwwroot/cogno
-            tar -xzf /tmp/cogno-dist.tar.gz -C /www/wwwroot/cogno
+            rm -rf /www/wwwroot/cogno.new
+            mkdir -p /www/wwwroot/cogno.new
+            tar -xzf /tmp/cogno-dist.tar.gz -C /www/wwwroot/cogno.new
             rm -f /tmp/cogno-dist.tar.gz
-            echo "--- deployed files:"
-            ls /www/wwwroot/cogno
+            # 原子切换: 请求要么全命中新版要么全命中旧版, 无部署窗口期 404
+            ts=$(date +%s)
+            mv /www/wwwroot/cogno /www/wwwroot/cogno.old.$ts
+            mv /www/wwwroot/cogno.new /www/wwwroot/cogno
+            rm -rf /www/wwwroot/cogno.old.*
             echo "--- health check:"
             curl -s -o /dev/null -w "cogno http status: %{http_code}\n" http://127.0.0.1:8090/
           '
