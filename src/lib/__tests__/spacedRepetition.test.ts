@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { nextInterval, isDue, review, getReviewItem } from '../spacedRepetition'
 import { db } from '../storage'
+import type { Mastery } from '../../types'
 
 afterEach(async () => {
   // 清理 fake-indexeddb，避免用例间串数据
@@ -18,8 +19,16 @@ describe('间隔重复', () => {
   })
 
   it('isDue 按 nextReviewAt 判定到期', () => {
-    expect(isDue({ conceptId: 'x', mastery: 0, reviewCount: 0, lastReviewedAt: 0, nextReviewAt: Date.now() - 1 }, Date.now())).toBe(true)
-    expect(isDue({ conceptId: 'x', mastery: 0, reviewCount: 0, lastReviewedAt: 0, nextReviewAt: Date.now() + 1000 }, Date.now())).toBe(false)
+    const makeItem = (nextReviewAt: number) => ({
+      conceptId: 'x',
+      mastery: 0 as Mastery,
+      reviewCount: 0,
+      lastReviewedAt: 0,
+      nextReviewAt,
+      history: [] as { at: number; mastery: Mastery }[],
+    })
+    expect(isDue(makeItem(Date.now() - 1), Date.now())).toBe(true)
+    expect(isDue(makeItem(Date.now() + 1000), Date.now())).toBe(false)
   })
 
   it('复习（grade 2+）提升掌握度，上限 3', async () => {

@@ -46,6 +46,10 @@ export function CalibrationOverlay({ onDone, onCancel }: Props) {
       <div className="cal-card panel">
         <h3>眼动追踪校准</h3>
         <p>请保持头部不动，依次点击屏幕上出现的 {POINTS.length} 个光点（按 Esc 可跳过，使用鼠标代理）。</p>
+        {/* Phase 1.5：明确告知摄像头数据处理方式 */}
+        <p style={{ fontSize: 12, opacity: 0.75 }}>
+          摄像头画面仅在浏览器本地实时处理，不会录制或上传；校准数据也可在此状态下随时关闭眼动。
+        </p>
         <div className="cal-progress">
           <div className="cal-bar" style={{ width: `${(step / POINTS.length) * 100}%` }} />
         </div>

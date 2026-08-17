@@ -100,3 +100,16 @@
     font-size: 13px;
   }
 }
+
+/* Phase 3.3 离线横幅：页面顶部通栏，黄色警示 */
+.offline-banner {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  padding: 8px 14px;
+  background: rgba(255, 193, 7, 0.92);
+  color: #3a2f00;
+  font-size: 13px;
+  text-align: center;
+  font-weight: 500;
+}

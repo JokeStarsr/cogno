@@ -15,6 +15,7 @@ import {
   loadBaselineRate,
   recordBaseline,
 } from '../../lib/readingSignals'
+import { getDeviceId, isTreatmentGroup } from '../../lib/experiment'
 import { CognitiveStateRing } from '../StateRing/CognitiveStateRing'
 import { TextViewer, type TextHandle } from './TextViewer'
 import { PdfViewer, type PdfHandle } from './PdfViewer'
@@ -29,6 +30,8 @@ import './ReaderPage.css'
 /** 简单问答缓存：同代理 + 同问题命中直接返回，减少 API 调用 */
 const agentCache = new Map<string, string>()
 const CACHE_MAX = 200
+/** A/B 实验组（Phase 2.2）：对照组禁用自动介入，仅保留手动对话与主动按钮 */
+const isExperimentTreatment = isTreatmentGroup(getDeviceId())
 /** 澄清者/连接者使用轻量模型(更便宜)，挑战者/拓展者用主模型 */
 const FAST_AGENTS: AgentId[] = ['clarifier', 'connector']
 
@@ -180,6 +183,8 @@ export function ReaderPage() {
     const sig = signalRef.current
     // 页面不可见(切标签/失焦)：不自动介入也不弹气泡，避免离开时攒下一堆打扰
     if (document.hidden) return
+    // A/B 对照组（Phase 2.2）：不自动介入也不弹气泡，手动按钮与对话始终可用
+    if (!isExperimentTreatment) return
     const calm = sig.isCalm(trig.calmSec)
     const masteredLabels = [...mastery].filter(([, m]) => m >= 2).map(([id]) => safeLabel(id))
     const interv = triggerRef.current.evaluate(

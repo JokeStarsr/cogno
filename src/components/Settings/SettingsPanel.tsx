@@ -4,6 +4,7 @@ import { AGENTS } from '../../lib/agents'
 import { baselineStatus } from '../../lib/readingSignals'
 import { db } from '../../lib/storage'
 import { chatCompletion, friendlyFailure, isLLMConfigured, LLMError } from '../../lib/llm'
+import { DataControls } from './DataControls'
 import type { AgentId } from '../../types'
 import './SettingsPanel.css'
 
@@ -12,6 +13,10 @@ const AGENT_IDS: AgentId[] = ['clarifier', 'challenger', 'connector', 'expander'
 export function SettingsPanel() {
   const { settings, updateSettings } = useApp()
   const [saved, setSaved] = useState(false)
+  // A/B 实验分组展示（Phase 2.2）：对照组 = 四代理不自动介入
+  const experimentBucket = (
+    typeof localStorage !== 'undefined' ? localStorage.getItem('cogno.experiment') : null
+  ) ? (JSON.parse(localStorage.getItem('cogno.experiment')!).bucket as string) : null
   const [base, setBase] = useState(() => baselineStatus())
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -360,6 +365,19 @@ export function SettingsPanel() {
             清空
           </button>
         </div>
+        {/* Phase 1.5：导出/删除数据（数据自主权） */}
+        <DataControls />
+        {/* Phase 2.2：实验分组展示 */}
+        {experimentBucket && (
+          <div className="set-row" style={{ borderTop: '1px solid var(--border)', marginTop: 10, paddingTop: 10 }}>
+            <label>A/B 实验分组</label>
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+              {experimentBucket === 'treatment'
+                ? '实验组：四代理自动介入已启用'
+                : '对照组：四代理仅手动对话（自动介入已关闭）'}
+            </span>
+          </div>
+        )}
       </section>
 
       <div className="set-save">

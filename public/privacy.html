@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>隐私政策 · Cogno Reader</title>
+<style>
+  :root { --bg:#0b1018; --surface:#131a2b; --ink:#e8eef4; --ink2:#9fb0c0; --accent:#40e0d0; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--ink); font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif; line-height:1.8; }
+  .wrap { max-width:720px; margin:0 auto; padding:48px 24px 80px; }
+  h1 { font-size:26px; margin-bottom:8px; }
+  .meta { color:var(--ink2); font-size:13px; margin-bottom:32px; }
+  h2 { font-size:18px; margin:28px 0 10px; color:var(--accent); }
+  p, li { color:var(--ink2); font-size:14.5px; margin-bottom:10px; }
+  ul { padding-left:20px; }
+  table { width:100%; border-collapse:collapse; margin:14px 0; font-size:13.5px; }
+  th, td { border:1px solid #223; padding:9px 12px; text-align:left; color:var(--ink2); }
+  th { color:var(--ink); background:var(--surface); }
+  .foot { margin-top:48px; font-size:12px; color:#6b7c8c; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>隐私政策</h1>
+  <div class="meta">生效日期：2026-08-18 · Cogno Reader</div>
+
+  <p>本政策说明 Cogno Reader（下称"本应用"）如何收集、使用与保护你的数据。我们遵循"本地优先、最小收集"原则：<b>目前所有数据默认仅存储在你的设备本地</b>，不上传任何服务器。</p>
+
+  <h2>1. 我们收集什么数据</h2>
+  <table>
+    <tr><th>数据类别</th><th>收集时机</th><th>用途</th></tr>
+    <tr><td>眼动坐标（注视点）</td><td>启用眼动追踪时</td><td>推断认知状态（理解/注意力/疲劳）</td></tr>
+    <tr><td>阅读行为（翻页/停留/回读/滚动）</td><td>阅读过程中持续</td><td>推断认知状态、生成个性化介入</td></tr>
+    <tr><td>摄像头画面</td><td>眼动追踪启用时</td><td>仅浏览器本地实时处理，<b>不录制、不上传</b></td></tr>
+    <tr><td>知识掌握度与复习记录</td><td>使用间隔回忆时</td><td>为你规划复习</td></tr>
+    <tr><td>文档内容（PDF/URL/文本）</td><td>导入文档时</td><td>本地阅读与 AI 分析；分批上传给 AI 服务商用于回答你的提问</td></tr>
+  </table>
+
+  <h2>2. 数据如何被使用</h2>
+  <ul>
+    <li>所有认知推断在<b>浏览器本地</b>完成（规则引擎 + 本地模型），不依赖服务器。</li>
+    <li>AI 对话（四代理/速问）会把<b>你正在阅读的片段</b>发送给你配置的 AI 服务端点（默认本地 sub2api，可通过设置更换）。发送前有明确配置可见性。</li>
+  </ul>
+
+  <h2>3. 数据存储</h2>
+  <ul>
+    <li>当前版本：全部数据保存在浏览器 IndexedDB（本地）。清除浏览器数据或运行"删除我的数据"将彻底删除。</li>
+    <li>未来接入云端同步时，本政策将更新并明确告知同步范围；你可以随时选择不同步。</li>
+  </ul>
+
+  <h2>4. 不分享原则</h2>
+  <p>我们<b>不会</b>把任何数据出售、转让或分享给第三方，除非：法律要求、经你明确同意、为保护你或他人安全所必需。</p>
+
+  <h2>5. 你的权利</h2>
+  <ul>
+    <li><b>导出</b>：设置页 → 数据自主权 → 导出我的数据，获得完整 JSON 副本。</li>
+    <li><b>删除</b>：设置页 → 删除我的数据，抹除本地全部记录。</li>
+    <li><b>同意管理</b>：首次使用需同意本政策；清除浏览器站点数据后可重新选择。</li>
+  </ul>
+
+  <h2>6. 联系我们</h2>
+  <p>如有隐私相关问题，请通过项目仓库 GitHub Discussions 联系我们。</p>
+
+  <div class="foot">本文档为开源项目的透明度声明，不构成法律意见。</div>
+</div>
+</body>
+</html>

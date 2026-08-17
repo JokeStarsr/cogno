@@ -1,0 +1,61 @@
+/* 隐私同意门（Phase 1.5）：全屏遮罩 + 居中卡片，深色主题与设计系统一致 */
+.consent-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(8, 12, 22, 0.92);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.consent-card {
+  max-width: 460px;
+  width: 100%;
+  background: var(--surface, #131a2b);
+  border: 1px solid var(--line, #1e2d45);
+  border-radius: 16px;
+  padding: 28px 26px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.consent-card h2 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  color: var(--text, #e8eef4);
+}
+.consent-card ul {
+  margin: 0 0 20px;
+  padding-left: 18px;
+  color: var(--text2, #9fb0c0);
+  font-size: 13.5px;
+  line-height: 1.8;
+}
+.consent-card li b {
+  color: var(--text, #e8eef4);
+}
+.consent-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.consent-link {
+  font-size: 13px;
+  color: var(--accent, #40e0d0);
+  text-decoration: underline;
+}
+.btn-consent {
+  padding: 11px 26px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6c5ce7, #5b4cdb);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-consent:hover {
+  filter: brightness(1.1);
+}
