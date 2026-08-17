@@ -23,15 +23,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // 静态资源全缓存 + AI 接口走网络优先（离线时兜底）
+        // 静态资源全量预缓存；AI 接口(/v1/messages)不在缓存范围，始终走网络
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https?:\/\/.*\/v1\/messages/,
-            handler: 'NetworkOnly',
-            options: { networkTimeoutSeconds: 8 },
-          },
-        ],
       },
     }),
   ],

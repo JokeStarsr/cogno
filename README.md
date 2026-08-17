@@ -59,7 +59,32 @@ npm run dev
 ## 构建与部署
 
 ```bash
+npm install
 npm run build   # 产物在 dist/
+npm test        # vitest 单测（不消耗任何 AI 额度）
 ```
 
-静态部署到 Vercel / Netlify / Nginx 即可。
+### 服务器自动部署（CI/CD）
+
+`.github/workflows/deploy.yml` 在 push 到 main 时自动执行：测试 → 构建 → scp 到 `115.159.221.62` 的 nginx 静态目录 → 健康检查。
+
+**一次性配置**（仓库 Settings → Secrets and variables → Actions）：
+1. 用已加入服务器 `~/.ssh/authorized_keys` 的部署公钥（仓库 `.github/deploy-key.pub`）配好私钥；
+2. 新建 Secret `COGNO_DEPLOY_KEY_B64`，值为**部署私钥的 base64**（Windows：`[Convert]::ToBase64String([IO.File]::ReadAllBytes("私钥路径"))`）。
+
+之后每次推送 main 即自动部署。
+
+### 本地手动部署（无 CI 时）
+
+```powershell
+npm run build --prefix D:\ClaudeCode\cogno
+# 打平打包 dist 内容（关键：不要带 dist 目录本身）
+(Get-ChildItem dist) | Compress-Archive -DestinationPath dist.zip -Force
+# Posh-SSH: Set-SCPItem -Destination /tmp/ 上传 → SSH 执行:
+#   cd /www/wwwroot/cogno && unzip -oq /tmp/dist.zip
+```
+
+## 云端接入（Supabase/Stripe，可选）
+
+本地优先架构已完成，云端同步/账号/支付**默认关闭**（未配置环境变量即纯本地模式）。
+接入步骤与建表 SQL 见 [docs/cloud-integration.md](./docs/cloud-integration.md)——需要先注册 Supabase 项目与 Stripe 商户。

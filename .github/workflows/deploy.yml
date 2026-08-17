@@ -1,0 +1,62 @@
+# Cogno Reader 自动部署（Phase 1.6）：
+# push 到 main → 测试 + 构建 → scp 到 115.159.221.62 的 nginx 静态目录 → 健康检查
+# 需要仓库 Secrets 配置（单个）：
+#   COGNO_DEPLOY_KEY_B64 — 部署私钥(base64)。当前公钥见 .github/deploy-key.pub
+#   （步骤：将部署私钥 base64 编码后粘贴，参考项目 README）
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    concurrency: deploy-production  # 防止并发部署互相覆盖
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm run test 2>/dev/null || npx vitest run
+
+      - name: Build
+        run: npm run build
+
+      - name: Prepare deployment key
+        env:
+          KEY_B64: ${{ secrets.COGNO_DEPLOY_KEY_B64 }}
+        run: |
+          echo "$KEY_B64" | base64 -d > /tmp/cogno_deploy_key
+          chmod 600 /tmp/cogno_deploy_key
+
+      - name: Package dist (flat)
+        run: tar -czf /tmp/cogno-dist.tar.gz -C dist .
+
+      - name: Upload to server
+        run: |
+          scp -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no \
+            /tmp/cogno-dist.tar.gz root@115.159.221.62:/tmp/cogno-dist.tar.gz
+
+      - name: Deploy & health check
+        run: |
+          ssh -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no root@115.159.221.62 '
+            set -e
+            mkdir -p /www/wwwroot/cogno
+            tar -xzf /tmp/cogno-dist.tar.gz -C /www/wwwroot/cogno
+            rm -f /tmp/cogno-dist.tar.gz
+            echo "--- deployed files:"
+            ls /www/wwwroot/cogno
+            echo "--- health check:"
+            curl -s -o /dev/null -w "cogno http status: %{http_code}\n" http://127.0.0.1:8090/
+          '
