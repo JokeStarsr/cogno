@@ -24,7 +24,7 @@ import { CalibrationOverlay } from './CalibrationOverlay'
 import { AgentPanel, type AgentTurn } from '../AgentPanel/AgentPanel'
 import { KnowledgeDrawer } from '../KnowledgeGrid/KnowledgeDrawer'
 import { ReviewOverlay } from './ReviewOverlay'
-import type { AgentId, ChatMessage, CognitiveState, Mastery } from '../../types'
+import type { AgentId, ChatMessage, CognitiveState, Mastery, ReadingDoc } from '../../types'
 import './ReaderPage.css'
 
 /** 简单问答缓存：同代理 + 同问题命中直接返回，减少 API 调用 */
@@ -411,6 +411,9 @@ export function ReaderPage() {
     }
   }
 
+  /** 续读恢复位置（resumeDocId 触发时填充，新导入时清空） */
+  const resumePosRef = useRef<{ page?: number; scrollTop?: number } | null>(null)
+
   /** 开启一次新会话并渲染内容；docId 用于把续读会话也关联回已保存文档 */
   const startSession = (src: ReaderSource, docId?: number) => {
     setSource(src)
@@ -468,6 +471,18 @@ export function ReaderPage() {
       conceptsTouched: [...mastery.keys()],
       agentInterventions: turns.filter((t) => t.role === 'agent' && t.reason).length,
     })
+    // 续读位置写入文档记录：PDF 记当前页，文本记滚动位置（从历史可精确续读）
+    const sess = await db.sessions.get(sessionIdRef.current)
+    if (sess?.docId) {
+      const patch: Partial<ReadingDoc> = {}
+      if (source.sourceType === 'pdf') {
+        patch.lastPage = pdfHandle.current?.getCurrentPage() ?? 0
+      } else {
+        const el = textHandle.current?.el
+        if (el) patch.lastScrollTop = el.scrollTop
+      }
+      void db.docs.update(sess.docId, patch)
+    }
   }, [source, mastery, turns])
 
   useEffect(() => {
@@ -493,8 +508,9 @@ export function ReaderPage() {
     let alive = true
     void (async () => {
       let src: ReaderSource | null = null
+      let doc: ReadingDoc | undefined
       try {
-        const doc = await getDoc(resumeDocId)
+        doc = await getDoc(resumeDocId)
         if (!alive) return
         if (!doc) {
           alert('该历史记录对应的文档已不存在（本地数据可能已被清空）')
@@ -509,7 +525,14 @@ export function ReaderPage() {
         alert('读取已保存文档失败，请重试')
       }
       if (!alive || token !== resumeTokenRef.current) return
-      if (src) startSession(src, resumeDocId)
+      if (src) {
+        // 恢复位置：PDF 跳上次页，文本滚上次位置
+        resumePosRef.current =
+          src.sourceType === 'pdf'
+            ? { page: doc?.lastPage && doc.lastPage > 0 ? doc.lastPage : 0 }
+            : { scrollTop: doc?.lastScrollTop ?? 0 }
+        startSession(src, resumeDocId)
+      }
       clearResume()
     })()
     return () => {
@@ -529,6 +552,7 @@ export function ReaderPage() {
             onScroll={handleScrollDelta}
             onTextReady={handlePdfText}
             onPageChange={handlePdfPage}
+            initialPage={resumePosRef.current?.page ?? 0}
           />
         ) : (
           <div className="reader-pane">
@@ -576,6 +600,7 @@ export function ReaderPage() {
                       onScroll={handleScrollDelta}
                       onVirtualScroll={handleVirtualScroll}
                       onConceptSeen={handleConceptSeen}
+                      initialScrollTop={resumePosRef.current?.scrollTop ?? 0}
                     />
                     <div className="reader-feedback">
                       <button className="feedback-btn confused" onClick={onConfused}>

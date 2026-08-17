@@ -95,6 +95,10 @@ export interface ReadingDoc {
   pdfData?: ArrayBuffer
   /** PDF 逐页抽取文本（供苏格拉底四代理取上下文） */
   pdfTexts?: string[]
+  /** 续读恢复：PDF 上次读到第几页（0 基） */
+  lastPage?: number
+  /** 续读恢复：文本模式上次滚动位置 */
+  lastScrollTop?: number
   createdAt: number
 }
 

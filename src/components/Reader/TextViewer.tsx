@@ -14,6 +14,8 @@ interface Props {
   /** 滚动即时上报虚拟页位置（替代 3s 轮询，翻页速率与停留统计更准） */
   onVirtualScroll?: (scrollTop: number, viewportH: number) => void
   onConceptSeen?: (conceptId: string) => void
+  /** 续读恢复：渲染后滚到的位置 */
+  initialScrollTop?: number
 }
 
 // ── 概念匹配器：标签按长度降序做正则交替，一次 matchAll 扫全文本，天然最长优先 ──
@@ -113,7 +115,7 @@ function conceptPopup(id: string) {
 }
 
 export const TextViewer = memo(
-  forwardRef<TextHandle, Props>(function TextViewer({ text, onScroll, onVirtualScroll, onConceptSeen }, ref) {
+  forwardRef<TextHandle, Props>(function TextViewer({ text, onScroll, onVirtualScroll, onConceptSeen, initialScrollTop }, ref) {
     const elRef = useRef<HTMLDivElement>(null)
     const paraRefs = useRef<(HTMLParagraphElement | null)[]>([])
     const prevTop = useRef(0)
@@ -155,6 +157,16 @@ export const TextViewer = memo(
 
     useEffect(() => {
       firedRef.current.clear()
+    }, [text])
+
+    // 续读恢复：文档渲染完成后滚动到上次位置（initialScrollTop 仅新文档生效）
+    useEffect(() => {
+      const el = elRef.current
+      if (el && initialScrollTop) {
+        el.scrollTop = Math.min(initialScrollTop, el.scrollHeight - el.clientHeight)
+        onVirtualScroll?.(el.scrollTop, el.clientHeight)
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [text])
 
     useImperativeHandle(ref, () => ({

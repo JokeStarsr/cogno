@@ -17,6 +17,8 @@ interface Props {
   onTextReady?: (pages: string[]) => void
   /** 滚动跨越页面时上报当前页索引（0-based） */
   onPageChange?: (pageIndex: number) => void
+  /** 续读恢复：加载完成后跳转到的页索引（0-based），默认 0 */
+  initialPage?: number
 }
 
 /** 视口外缓冲页数：渲染范围 = 当前页 ±CHUNK */
@@ -75,7 +77,7 @@ function PdfPage({ page, scale, visible }: { page: pdfjsLib.PDFPageProxy; scale:
 }
 
 export const PdfViewer = memo(
-  forwardRef<PdfHandle, Props>(function PdfViewer({ file, onScroll, onTextReady, onPageChange }, ref) {
+  forwardRef<PdfHandle, Props>(function PdfViewer({ file, onScroll, onTextReady, onPageChange, initialPage = 0 }, ref) {
     const scrollRef = useRef<HTMLDivElement>(null)
     const [state, setState] = useState<{ loading: boolean; error: string; pages: number }>({
       loading: true,
@@ -91,12 +93,20 @@ export const PdfViewer = memo(
     const [noText, setNoText] = useState(false)
     const pageTextsRef = useRef<string[]>([])
     const lastPageRef = useRef(-1)
+    /** 页偏移缓存：滚动每秒触发数十次，读 offsetTop 会强制同步重排（layout thrashing）
+     *  是 PDF 滚动卡顿的主因之一——页顶相对容器不变，按子元素数量失效即可 */
+    const topsCacheRef = useRef<number[] | null>(null)
 
     // 各页相对滚动容器顶部的偏移（依赖 .pdf-page-wrap 的 minHeight）
     const getPageTops = useCallback((): number[] => {
       const sc = scrollRef.current
       if (!sc) return []
-      return Array.from(sc.children).map((el) => (el as HTMLElement).offsetTop)
+      const n = sc.children.length
+      const cached = topsCacheRef.current
+      if (cached && cached.length === n) return cached
+      const tops = Array.from(sc.children).map((el) => (el as HTMLElement).offsetTop)
+      topsCacheRef.current = tops
+      return tops
     }, [])
 
     const getCurrentPage = useCallback((): number => {
@@ -165,7 +175,19 @@ export const PdfViewer = memo(
             pages.push(p)
           }
           setPageProxies(pages)
+          topsCacheRef.current = null // 新文档 → 页偏移缓存失效
           if (alive) setState((s) => ({ ...s, loading: false, pages: pages.length }))
+          // 续读恢复：渲染完成后跳到上次阅读的页
+          if (alive && initialPage > 0) {
+            setTimeout(() => {
+              const sc = scrollRef.current
+              const tops = getPageTops()
+              if (sc && tops.length) {
+                sc.scrollTop = tops[Math.min(initialPage, tops.length - 1)]
+                updateRange()
+              }
+            }, 60)
+          }
           // 后台抽取逐页文本（渲染先行，不阻塞首屏）
           void (async () => {
             const texts: string[] = []
@@ -201,6 +223,7 @@ export const PdfViewer = memo(
     // 范围更新/窗口尺寸变化 → 重算可视范围
     useEffect(() => {
       if (!pageProxies.length) return
+      topsCacheRef.current = null // scale 变化 → 页偏移变化，缓存失效
       const raf = requestAnimationFrame(updateRange)
       return () => cancelAnimationFrame(raf)
     }, [pageProxies.length, scale, updateRange])

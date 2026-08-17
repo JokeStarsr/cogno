@@ -38,7 +38,6 @@ export class CognitiveEngine {
   private pageVisible = true
   /** 5 分钟窗口的触发统计（触发判定已按页语义重构，见 readingSignals.ts） */
   private regressions5m: number[] = []
-  private scrollHistory: { px: number; ts: number }[] = []
   private lastScrollDelta = 0
   /** 最近一次 BehavioralSnapshot（2s 循环推进） */
   private behavioral: BehavioralSnapshot | null = null
@@ -71,15 +70,13 @@ export class CognitiveEngine {
 
   pushScroll(deltaPx: number) {
     this.scrollPx += Math.abs(deltaPx)
-    this.scrollHistory.push({ px: Math.abs(deltaPx), ts: Date.now() })
     // 滚动方向反转 = 回看上文(回滚信号,文档中"困惑=100%"的信号)
     if (deltaPx * this.lastScrollDelta < 0) {
       this.regressions5m.push(Date.now())
+      // 保守上限防滚动热路径数组膨胀（过期条目由 recompute 的窗口过滤清理）
+      if (this.regressions5m.length > 500) this.regressions5m.shift()
     }
     this.lastScrollDelta = deltaPx
-    const fiveMin = Date.now() - 5 * 60_000
-    this.scrollHistory = this.scrollHistory.filter((s) => s.ts > fiveMin)
-    this.regressions5m = this.regressions5m.filter((t) => t > fiveMin)
   }
 
   private inReadingArea(g: GazePoint): boolean {
