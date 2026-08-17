@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useApp } from './context/AppContext'
 import { PrivacyConsent } from './components/Legal/PrivacyConsent'
+import { AuthPage } from './components/Auth/AuthPage'
+import { isCloudEnabled } from './lib/supabase'
 import { Dashboard } from './components/Dashboard/Dashboard'
 import { ReaderPage } from './components/Reader/ReaderPage'
 import { SettingsPanel } from './components/Settings/SettingsPanel'
@@ -36,8 +38,39 @@ function OfflineBanner() {
   )
 }
 
+/** 顶部账号区（Phase 1.3）：云端未配置时不出现；登录后显示邮箱与同步状态 */
+function AccountArea() {
+  const { user, setAuthOpen, syncStatus, syncNow, signOutUser } = useApp()
+  if (!isCloudEnabled) return null
+  if (!user) {
+    return (
+      <button className="nav-link account-btn" onClick={() => setAuthOpen(true)} title="登录后开启多端同步">
+        🔐 登录/同步
+      </button>
+    )
+  }
+  const email = user.email ?? '已登录'
+  return (
+    <div className="account-area">
+      <span className="account-email" title={email}>
+        {email.length > 20 ? email.slice(0, 18) + '…' : email}
+      </span>
+      <span
+        className={`sync-dot ${syncStatus}`}
+        title={syncStatus === 'syncing' ? '同步中' : syncStatus === 'error' ? '同步出错' : '已同步'}
+      />
+      <button className="nav-link account-btn" onClick={() => void syncNow()} title="立即同步">
+        ⟳
+      </button>
+      <button className="nav-link account-btn account-out" onClick={() => void signOutUser()}>
+        登出
+      </button>
+    </div>
+  )
+}
+
 export default function App() {
-  const { view, setView } = useApp()
+  const { view, setView, authOpen, setAuthOpen } = useApp()
 
   return (
     <PrivacyConsent>
@@ -60,7 +93,9 @@ export default function App() {
           ))}
         </div>
         <div className="nav-spacer" />
+        <AccountArea />
       </nav>
+      {authOpen && <AuthPage onClose={() => setAuthOpen(false)} />}
       <main className="app-main">
         <div className={`page ${view === 'dashboard' ? 'page-active' : ''}`}>
           <Dashboard />

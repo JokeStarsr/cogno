@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import { db, setSetting } from '../lib/storage'
 import { DEFAULT_TRIGGER_CONFIG } from '../lib/agents'
+import { onAuthStateChange, signOut } from '../lib/auth'
+import { syncEngine } from '../lib/sync'
+import type { User } from '@supabase/supabase-js'
 import type { AgentTriggerConfig, LLMConfig, ViewId } from '../types'
 
 export interface AppSettings {
@@ -36,6 +39,16 @@ interface AppContextValue {
   requestResume: (docId: number) => void
   clearResume: () => void
   resumeDocId: number | null
+  /** 云端账号（Phase 1.2/1.3）：null=未登录或云端未配置 */
+  user: User | null
+  authOpen: boolean
+  setAuthOpen: (v: boolean) => void
+  /** 同步状态：'off' 云端未配置 / 'idle' / 'syncing' / 'error' */
+  syncStatus: 'off' | 'idle' | 'syncing' | 'error'
+  /** 手动触发同步（拉取 + 推送队列） */
+  syncNow: () => Promise<void>
+  /** 登出（浏览器本地数据保留） */
+  signOutUser: () => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -44,6 +57,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [view, setView] = useState<ViewId>('dashboard')
   const [resumeDocId, setResumeDocId] = useState<number | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [authOpen, setAuthOpen] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<'off' | 'idle' | 'syncing' | 'error'>('off')
+
+  // ── 云端账号与会话（Phase 1.2/1.3）：登录后自动拉取云端数据并推送本地队列 ──
+  const syncNow = useCallback(async () => {
+    if (!syncEngine.isReady()) {
+      setSyncStatus('off')
+      return
+    }
+    if (!user) {
+      setSyncStatus('idle')
+      return
+    }
+    setSyncStatus('syncing')
+    try {
+      await syncEngine.pullUserData()
+      await syncEngine.flush()
+      setSyncStatus('idle')
+    } catch {
+      setSyncStatus('error')
+    }
+  }, [user])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      // 云端是否启用（构建期决定）；未启用时保持 off，不注册监听
+      const { isCloudEnabled } = await import('../lib/supabase')
+      if (!isCloudEnabled) {
+        if (alive) setSyncStatus('off')
+        return
+      }
+      const unsub = onAuthStateChange((u) => {
+        setUser(u)
+        setSyncStatus(u ? 'idle' : 'idle')
+        // 首次登录：拉取云端学习数据 → 推送本地积累的队列
+        if (u) void syncNow()
+      })
+      return () => {
+        alive = false
+        unsub()
+      }
+    })()
+  }, [syncNow])
+
+  // 定时兜底同步：登录状态下每 90s 尝试推一次队列（网络恢复/失败重试）
+  useEffect(() => {
+    if (!user) return
+    const iv = setInterval(() => {
+      void syncEngine.flush()
+    }, 90_000)
+    return () => clearInterval(iv)
+  }, [user])
+
+  const signOutUser = async () => {
+    await signOut()
+    setUser(null)
+  }
 
   useEffect(() => {
     let alive = true
@@ -82,7 +154,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider
-      value={{ settings, updateSettings, view, setView, requestResume, clearResume, resumeDocId }}
+      value={{
+        settings,
+        updateSettings,
+        view,
+        setView,
+        requestResume,
+        clearResume,
+        resumeDocId,
+        user,
+        authOpen,
+        setAuthOpen,
+        syncStatus,
+        syncNow,
+        signOutUser,
+      }}
     >
       {children}
     </AppContext.Provider>

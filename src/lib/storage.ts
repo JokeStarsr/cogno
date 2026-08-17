@@ -26,6 +26,22 @@ class CognoDB extends Dexie {
 
 export const db = new CognoDB()
 
+// ── 本地写入钩子（Phase 1.2 同步层接入点）──
+// storage 自身不 import sync（避免循环依赖）：sync.ts 启动时注册回调，
+// 每次本地写库成功后同步层把操作入队。settings 表（含 AI key）永不挂钩。
+
+export type WriteHook = (
+  table: 'concepts' | 'cognitiveLogs',
+  action: 'insert' | 'update' | 'delete',
+  data: unknown
+) => void
+
+export let writeHook: WriteHook | null = null
+
+export function setWriteHook(h: WriteHook | null): void {
+  writeHook = h
+}
+
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {
   const row = await db.settings.get(key)
   return (row?.value as T) ?? fallback
@@ -41,6 +57,8 @@ const COGNITIVE_LOG_TTL = 6 * 3600 * 1000
 let lastLogCleanup = 0
 export async function appendCognitiveLog(sample: CognitiveSample): Promise<void> {
   await db.cognitiveLogs.add(sample)
+  // 同步层 30s 聚合入队（只推趋势密度，见 sync.enqueue）
+  writeHook?.('cognitiveLogs', 'insert', sample)
   const now = Date.now()
   if (now - lastLogCleanup < 60_000) return
   lastLogCleanup = now

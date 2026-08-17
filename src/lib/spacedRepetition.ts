@@ -1,5 +1,5 @@
 import type { Mastery, ReviewItem } from '../types'
-import { db } from './storage'
+import { db, writeHook } from './storage'
 
 /** 艾宾浩斯间隔重复间隔（天） */
 const INTERVALS_DAYS = [1, 2, 4, 7, 15, 30, 60]
@@ -54,6 +54,8 @@ export async function review(conceptId: string, grade: 0 | 1 | 2 | 3): Promise<R
     history: [...item.history, { at: now, mastery }].slice(-40),
   }
   await db.concepts.put(next)
+  // 云端同步入队（Phase 1.2）：掌握度变化跨设备可见；settings 类敏感数据不在此列
+  writeHook?.('concepts', 'update', next)
   return next
 }
 
