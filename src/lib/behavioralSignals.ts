@@ -38,13 +38,22 @@ export class BehavioralSignalTracker {
   private hiddenMsAccum = 0
   private mouseIn = 0
   private mouseTotal = 0
-  private readingEl: HTMLElement | null = null
+  /** 阅读区矩形缓存：mousemove 每秒触发数十次，事件内直接读
+   *  getBoundingClientRect() 会强制同步布局（layout thrashing），
+   *  是持续卡顿的主因——改为由 ReaderPage 的 3s bounds tick 定期刷新 */
+  private cachedRect: { left: number; right: number; top: number; bottom: number } | null = null
   private lastSelectionLen = 0
   private attached = false
 
-  /** 绑定阅读区容器（鼠标占比以它为界）；切换文档时重绑 */
+  /** 绑定阅读区容器（鼠标占比以它为界）；切换文档/滚动区域变化时重绑
+   *  （ReaderPage 认知循环每 3s 调用一次，顺带刷新缓存矩形） */
   attachReadingArea(el: HTMLElement | null) {
-    this.readingEl = el
+    if (el) {
+      const r = el.getBoundingClientRect()
+      this.cachedRect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+    } else {
+      this.cachedRect = null
+    }
     this.mouseIn = 0
     this.mouseTotal = 0
   }
@@ -68,7 +77,7 @@ export class BehavioralSignalTracker {
     document.removeEventListener('visibilitychange', this.onVisibility)
     window.removeEventListener('blur', this.onBlur)
     window.removeEventListener('mousemove', this.onMouseMove)
-    this.readingEl = null
+    this.cachedRect = null
   }
 
   /** 拉取当前窗口快照（每次调用后重置累计值，供 2s 循环消费） */
@@ -138,8 +147,9 @@ export class BehavioralSignalTracker {
 
   private onMouseMove = (e: MouseEvent) => {
     this.mouseTotal++
-    if (!this.readingEl) return
-    const r = this.readingEl.getBoundingClientRect()
+    // 只做坐标比较，绝不在此触发布局（见 cachedRect 注释）
+    const r = this.cachedRect
+    if (!r) return
     if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
       this.mouseIn++
     }
