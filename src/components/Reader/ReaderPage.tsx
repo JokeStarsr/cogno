@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { CognitiveEngine } from '../../lib/cognitive'
+import { BehavioralSignalTracker } from '../../lib/behavioralSignals'
 import { AgentTrigger, AGENTS } from '../../lib/agents'
 import { createTrackingController, subscribe, type TrackingController } from '../../lib/eyeTracking'
 import { isLLMConfigured, chatCompletion, trimHistory, trimContext, friendlyFailure, LLMError } from '../../lib/llm'
@@ -65,6 +66,8 @@ export function ReaderPage() {
   const engineRef = useRef(new CognitiveEngine())
   const triggerRef = useRef(new AgentTrigger())
   const signalRef = useRef(new ReadingEventTracker())
+  /** 行为信号（选中/复制/失焦/鼠标停留）：无摄像头场景的认知推断来源 */
+  const behavioralRef = useRef(new BehavioralSignalTracker())
   /** 个人翻页速率基线（页/分）；null = 样本不足 */
   const baselineRef = useRef<number | null>(null)
   const controllerRef = useRef<TrackingController | null>(null)
@@ -102,6 +105,9 @@ export function ReaderPage() {
   useEffect(() => {
     const iv = setInterval(() => {
       const active = viewRef.current === 'reader'
+      // 行为信号：无论是否阅读视图都先清空累计（防堆积），阅读时推给引擎融合
+      const bs = behavioralRef.current.getSnapshot()
+      engineRef.current.pushBehavioralSignals(active ? bs : null)
       if (!active) return
       const st = engineRef.current.recompute()
       stateRef.current = st
@@ -119,6 +125,8 @@ export function ReaderPage() {
       if (el) {
         const r = el.getBoundingClientRect()
         engineRef.current.setReadingBounds({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })
+        // 行为信号鼠标占比以同一阅读区为界
+        behavioralRef.current.attachReadingArea(el)
         // 文本模式虚拟页检测（PDF 模式走 onPageChange；滚动时由 TextViewer 即时上报）
         signalRef.current.setTextScroll(el.scrollTop, el.clientHeight)
       }
@@ -132,9 +140,12 @@ export function ReaderPage() {
   // ── 会话保存 ──
   useEffect(() => {
     mountedRef.current = true
+    // 行为信号监听：挂载即启用（阅读区元素指针通过 attachReadingArea 动态更新）
+    behavioralRef.current.attach()
     return () => {
       mountedRef.current = false
       controllerRef.current?.stop()
+      behavioralRef.current.detach()
     }
   }, [])
 

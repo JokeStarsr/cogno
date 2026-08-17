@@ -51,40 +51,41 @@ export function findGaps(targetId: string, masteredIds: Set<string>): string[] {
 }
 
 /**
- * 从已掌握集合出发，沿依赖边求到目标的最短学习路径。
- * 返回按学习顺序排列的节点 id 序列（含目标）。
+ * 从已掌握集合出发，求到目标的学习路径。
+ * 返回按学习顺序排列的节点 id 序列（含目标），满足闭包性：
+ * 路径中每个节点的未掌握前置都出现在它之前（拓扑序），因此按序学即可。
+ * 若目标已被掌握，直接返回 [target]。
  */
 export function findLearningPath(targetId: string, masteredIds: Set<string>): string[] {
   if (masteredIds.has(targetId)) return [targetId]
-  // 反向边：from 依赖 to，即 from -> to 表示"要先学 to"
-  // 我们希望从 mastered 走到 target，沿依赖反向传播
-  const parents = new Map<string, string>()
-  const visited = new Set<string>(masteredIds)
-  const queue = [...masteredIds]
+
+  // 1) 收集"尚需学习"的闭包：目标的全部未掌握前置（含间接）
+  const needed = new Map<string, Set<string>>() // 节点 id → 其未掌握的直接前置
+  const visited = new Set<string>([targetId])
+  const queue = [targetId]
   while (queue.length) {
     const cur = queue.shift()!
-    // 所有依赖了 cur 的节点（cur 是它们的前置）
-    for (const n of DS_ALGO_GRAPH) {
-      if (!n.dependencies.includes(cur)) continue
-      if (visited.has(n.id)) continue
-      visited.add(n.id)
-      parents.set(n.id, cur)
-      if (n.id === targetId) break
-      queue.push(n.id)
+    const unmastered = getConcept(cur).dependencies.filter((d) => !masteredIds.has(d))
+    needed.set(cur, new Set(unmastered))
+    for (const d of unmastered) {
+      if (!visited.has(d)) {
+        visited.add(d)
+        queue.push(d)
+      }
     }
-    if (parents.has(targetId)) break
   }
-  if (!parents.has(targetId)) {
-    // 不可达（例如缺少中间依赖数据）——退化为缺口提示
-    return []
+
+  // 2) 按依赖先行拓扑排序（图是 DAG，done 集合防重复访问）
+  const order: string[] = []
+  const done = new Set<string>()
+  const visit = (id: string) => {
+    if (done.has(id)) return
+    done.add(id)
+    for (const dep of needed.get(id) ?? []) visit(dep)
+    order.push(id)
   }
-  const path: string[] = []
-  let cur: string | undefined = targetId
-  while (cur !== undefined) {
-    path.unshift(cur)
-    cur = parents.get(cur)
-  }
-  return path
+  visit(targetId)
+  return order
 }
 
 /** 阻塞度：缺失该概念会阻碍多少个后继概念学习 */

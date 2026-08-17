@@ -23,6 +23,7 @@ export class LLMError extends Error {
 
 const BALANCE_HINTS = [
   'insufficient_balance',
+  'insufficient balance', // sub2api/上游返回空格变体
   'insufficient_quota',
   'no available accounts',
   '余额不足',
