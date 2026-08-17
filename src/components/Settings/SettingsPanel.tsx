@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { AGENTS } from '../../lib/agents'
 import { baselineStatus } from '../../lib/readingSignals'
@@ -10,6 +10,49 @@ import './SettingsPanel.css'
 
 const AGENT_IDS: AgentId[] = ['clarifier', 'challenger', 'connector', 'expander']
 
+type SettingsForm = {
+  baseUrl: string
+  apiKey: string
+  model: string
+  fastModel: string
+  sensitivity: number
+  mouseProxy: boolean
+  trigEnabled: Record<string, boolean>
+  trigCooldownMin: number
+  trigCalmSec: number
+  trigClarifyDwellSec: number
+  trigClarifyPageReread: number
+  trigChallengerMult: number
+  trigChallengerFallback: number
+  trigChallengerWindowMin: number
+  trigExpanderDwellSec: number
+  trigNudgeDwellSec: number
+  trigNudgeCooldownMin: number
+}
+
+/** 从应用设置构建表单初值（设置从 IndexedDB 异步恢复，见下方同步 effect） */
+function buildForm(s: ReturnType<typeof useApp>['settings']): SettingsForm {
+  return {
+    baseUrl: s.llm.baseUrl,
+    apiKey: s.llm.apiKey,
+    model: s.llm.model,
+    fastModel: s.fastModel,
+    sensitivity: s.sensitivity,
+    mouseProxy: s.mouseProxy,
+    trigEnabled: { ...s.triggers.enabled },
+    trigCooldownMin: s.triggers.cooldownSec / 60,
+    trigCalmSec: s.triggers.calmSec,
+    trigClarifyDwellSec: s.triggers.clarifyDwellSec,
+    trigClarifyPageReread: s.triggers.clarifyPageReread,
+    trigChallengerMult: s.triggers.challengerRateMult,
+    trigChallengerFallback: s.triggers.challengerFallbackRate,
+    trigChallengerWindowMin: s.triggers.challengerWindowMin,
+    trigExpanderDwellSec: s.triggers.expanderDwellSec,
+    trigNudgeDwellSec: s.triggers.nudgeDwellSec,
+    trigNudgeCooldownMin: s.triggers.nudgeCooldownSec / 60,
+  }
+}
+
 export function SettingsPanel() {
   const { settings, updateSettings } = useApp()
   const [saved, setSaved] = useState(false)
@@ -20,25 +63,18 @@ export function SettingsPanel() {
   const [base, setBase] = useState(() => baselineStatus())
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
-  const [form, setForm] = useState(() => ({
-    baseUrl: settings.llm.baseUrl,
-    apiKey: settings.llm.apiKey,
-    model: settings.llm.model,
-    fastModel: settings.fastModel,
-    sensitivity: settings.sensitivity,
-    mouseProxy: settings.mouseProxy,
-    trigEnabled: { ...settings.triggers.enabled },
-    trigCooldownMin: settings.triggers.cooldownSec / 60,
-    trigCalmSec: settings.triggers.calmSec,
-    trigClarifyDwellSec: settings.triggers.clarifyDwellSec,
-    trigClarifyPageReread: settings.triggers.clarifyPageReread,
-    trigChallengerMult: settings.triggers.challengerRateMult,
-    trigChallengerFallback: settings.triggers.challengerFallbackRate,
-    trigChallengerWindowMin: settings.triggers.challengerWindowMin,
-    trigExpanderDwellSec: settings.triggers.expanderDwellSec,
-    trigNudgeDwellSec: settings.triggers.nudgeDwellSec,
-    trigNudgeCooldownMin: settings.triggers.nudgeCooldownSec / 60,
-  }))
+  const [form, setForm] = useState<SettingsForm>(() => buildForm(settings))
+
+  // 关键修复：settings 由 AppProvider 从 IndexedDB 异步恢复，恢复完成前表单是默认值。
+  // 挂载后仅同步一次（用户手动改过则不覆盖），否则每次刷新/重登表单都会回到默认，
+  // 表现为"保存了但还要重新配置"
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    setForm(buildForm(settings))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings])
 
   const save = async () => {
     await updateSettings({
