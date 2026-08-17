@@ -6,6 +6,8 @@ import { db } from '../../lib/storage'
 import { chatCompletion, friendlyFailure, isLLMConfigured, LLMError } from '../../lib/llm'
 import { DISCIPLINES, type DisciplineKey } from '../../lib/graphRegistry'
 import { currentNodesSnapshot, getDiscipline, setDiscipline, subscribeDiscipline } from '../../lib/knowledge'
+import { isCloudEnabled } from '../../lib/supabase'
+import { PricingPanel } from './PricingPanel'
 import { DataControls } from './DataControls'
 import type { AgentId } from '../../types'
 import './SettingsPanel.css'
@@ -406,6 +408,8 @@ export function SettingsPanel() {
           <span className="set-hint">分钟</span>
         </div>
       </section>
+
+      <PricingPanel currentPlan="free" cloudReady={isCloudEnabled} />
 
       <section className="set-section panel">
         <h2>眼动追踪</h2>

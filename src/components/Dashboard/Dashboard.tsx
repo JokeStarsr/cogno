@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext'
 import { listConcepts, listDue } from '../../lib/spacedRepetition'
 import { getConcept } from '../../lib/knowledge'
 import { db } from '../../lib/storage'
+import { LearningOutcomes } from './LearningOutcomes'
 import type { ReviewItem, ReadingSession } from '../../types'
 import './Dashboard.css'
 
@@ -105,6 +106,8 @@ export function Dashboard() {
           配置 AI
         </button>
       </div>
+
+      <LearningOutcomes />
 
       <div className="dash-columns">
         <div className="dash-col panel">

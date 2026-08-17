@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { generateQuiz, localFallbackQuiz, saveQuizRecord, type QuizPhase, type QuizQuestion } from '../../lib/quiz'
 import { friendlyFailure, LLMError } from '../../lib/llm'
+import { notifyQuizSaved } from '../Dashboard/LearningOutcomes'
 import type { LLMConfig } from '../../types'
 import './QuizOverlay.css'
 
@@ -80,8 +81,9 @@ export function QuizOverlay({ open, candidates, cfg, fastModel, onClose }: Props
       setPretestScore(score)
       void loadQuiz(conceptId!, 'posttest')
     } else {
-      // 后测完成：落盘记录并展示对比
+      // 后测完成：落盘记录并展示对比；广播给学习概览的测评趋势组件刷新
       saveQuizRecord({ conceptId: conceptId!, pretest: pretestScore, posttest: score, createdAt: Date.now() })
+      notifyQuizSaved()
       setStage('result')
     }
   }

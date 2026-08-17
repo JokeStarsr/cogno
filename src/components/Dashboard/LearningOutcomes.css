@@ -1,0 +1,109 @@
+.lo {
+  margin-top: 14px;
+}
+.lo-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lo-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.lo-note {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.lo-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 10px;
+}
+@media (max-width: 720px) {
+  .lo-body {
+    grid-template-columns: 1fr;
+  }
+}
+.lo-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.lo-grid {
+  stroke: rgba(128, 128, 128, 0.14);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.lo-axis {
+  font-size: 10px;
+  fill: var(--text-faint);
+}
+.lo-line {
+  fill: none;
+  stroke-width: 2;
+}
+.lo-line.pre { stroke: var(--agent-clarifier, #40e0d0); }
+.lo-line.post { stroke: #2ecc71; }
+.lo-area {
+  opacity: 0.08;
+}
+.lo-area.pre { fill: var(--agent-clarifier, #40e0d0); }
+.lo-area.post { fill: #2ecc71; }
+.lo-dot.pre { fill: var(--agent-clarifier, #40e0d0); }
+.lo-dot.post { fill: #2ecc71; }
+.lo-xlabel {
+  font-size: 9px;
+  fill: var(--text-faint);
+}
+.lo-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.lo-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lo-key::before {
+  content: '';
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+.lo-key.pre::before { background: var(--agent-clarifier, #40e0d0); }
+.lo-key.post::before { background: #2ecc71; }
+.lo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lo-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.lo-row-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-pure);
+}
+.lo-row-scores {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.lo-row-delta {
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+.lo-row-delta.up { color: #2ecc71; }
+.lo-row-delta.down { color: var(--agent-challenger, #ff6347); }
