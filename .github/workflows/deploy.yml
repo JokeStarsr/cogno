@@ -41,6 +41,7 @@ jobs:
         env:
           GHA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set +e
           {
             echo "# CI 诊断 run $GITHUB_RUN_NUMBER ($GITHUB_REF)"
             echo "NPM: $(npm --version) / NODE: $(node --version)"
@@ -56,12 +57,11 @@ jobs:
               /tmp/npm-ci.log root@115.159.221.62:/tmp/ci-npm.log 2>&1 | tail -25
             echo '```'
           } > /tmp/diag-body.txt 2>&1
-          jq -R --slurp --arg title "CI 诊断 run $GITHUB_RUN_NUMBER" \
+          jq -R -s --arg title "CI 诊断 run $GITHUB_RUN_NUMBER" \
             '{"title":$title,"body":.}' /tmp/diag-body.txt > /tmp/diag.json
-          curl -fsS -X POST -H "Authorization: token $GHA_TOKEN" \
+          curl -sS -X POST -H "Authorization: token $GHA_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/JokeStarsr/cogno/issues \
-            -d @/tmp/diag.json || true
+            "https://api.github.com/repos/JokeStarsr/cogno/issues" -d @/tmp/diag.json | head -c 300
           false
 
       - name: Test
