@@ -44,6 +44,11 @@ export function AuthPage({ onClose }: { onClose: () => void }) {
   return (
     <div className="auth-mask" onClick={() => !busy && onClose()}>
       <div className="auth-card" onClick={(e) => e.stopPropagation()}>
+        {/* 浏览器密码管理器蜜罐：给 Chrome/Edge 一个"已经记过密码"的假表单，
+            它就不会在本页其他输入框（如与代理对话）旁主动弹"保存密码"气泡 */}
+        <input type="text" name="username" autoComplete="username" style={{ display: 'none' }} tabIndex={-1} aria-hidden="true" readOnly />
+        <input type="password" name="password" autoComplete="current-password" style={{ display: 'none' }} tabIndex={-1} aria-hidden="true" readOnly />
+
         <button className="auth-close" onClick={onClose} aria-label="关闭">
           ×
         </button>
@@ -62,7 +67,7 @@ export function AuthPage({ onClose }: { onClose: () => void }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          autoComplete="email"
+          autoComplete="username"
         />
 
         <label className="auth-label" htmlFor="auth-password">
@@ -75,7 +80,8 @@ export function AuthPage({ onClose }: { onClose: () => void }) {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={mode === 'signup' ? '至少 8 位' : '请输入密码'}
-          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+          // 恒为 new-password：阻止浏览器"是否保存此密码"的弹出（登录页也不保存）
+          autoComplete="new-password"
           onKeyDown={(e) => e.key === 'Enter' && !busy && submit()}
         />
 

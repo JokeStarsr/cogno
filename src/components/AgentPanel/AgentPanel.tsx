@@ -110,6 +110,9 @@ export const AgentPanel = memo(function AgentPanel({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && submit()}
           disabled={loading}
+          // 这里是对话输入，明确非登录凭据——防止密码管理器在此弹保存/填充提示
+          autoComplete="off"
+          name="agent-chat"
         />
         <button className="btn-primary" onClick={submit} disabled={loading || !input.trim()}>
           发送
