@@ -33,6 +33,13 @@ jobs:
           echo "$KEY_B64" | base64 -d > /tmp/cogno_deploy_key
           chmod 600 /tmp/cogno_deploy_key
 
+      # node 22 部分小版本自带 npm 10，对 lock 中跨平台 optional 包硬失败
+      # （EBADPLATFORM / Missing from lock file），显式钉住 npm 11 规避
+      - name: Pin npm 11
+        run: |
+          npm install -g npm@11
+          npm --version
+
       - name: Install
         run: npm ci 2>&1 | tee /tmp/npm-ci.log; test ${PIPESTATUS[0]} -eq 0
 
