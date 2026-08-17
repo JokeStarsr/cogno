@@ -7,3 +7,5 @@ npm-debug.log*
 *.tsbuildinfo
 .vite
 preview*.log
+
+dist-bundle.tar.gz
