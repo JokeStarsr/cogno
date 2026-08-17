@@ -65,13 +65,16 @@ export function SettingsPanel() {
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [form, setForm] = useState<SettingsForm>(() => buildForm(settings))
 
-  // 关键修复：settings 由 AppProvider 从 IndexedDB 异步恢复，恢复完成前表单是默认值。
-  // 挂载后仅同步一次（用户手动改过则不覆盖），否则每次刷新/重登表单都会回到默认，
-  // 表现为"保存了但还要重新配置"
-  const hydratedRef = useRef(false)
+  // settings 由 AppProvider 从 IndexedDB 异步恢复（恢复完成前是默认值）。恢复完成后再把
+  // 表单回填为已保存配置；用户一旦手改过任何字段（touchedRef）就不再自动回填，
+  // 防止 hydration 结果覆盖正在进行的编辑。
+  const touchedRef = useRef(false)
+  const updateForm = (patch: Partial<SettingsForm>) => {
+    touchedRef.current = true
+    setForm((f) => ({ ...f, ...patch }))
+  }
   useEffect(() => {
-    if (hydratedRef.current) return
-    hydratedRef.current = true
+    if (touchedRef.current) return
     setForm(buildForm(settings))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings])
@@ -156,18 +159,18 @@ export function SettingsPanel() {
           <input
             className="input"
             value={form.baseUrl}
-            onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+            onChange={(e) => updateForm({ ...form, baseUrl: e.target.value })}
             placeholder="http://localhost:8180"
           />
           <button
             className="btn-ghost"
-            onClick={() => setForm({ ...form, baseUrl: 'http://localhost:8180' })}
+            onClick={() => updateForm({ ...form, baseUrl: 'http://localhost:8180' })}
           >
             本地
           </button>
           <button
             className="btn-ghost"
-            onClick={() => setForm({ ...form, baseUrl: 'http://115.159.221.62:8090/ai' })}
+            onClick={() => updateForm({ ...form, baseUrl: 'http://115.159.221.62:8090/ai' })}
           >
             服务器代理
           </button>
@@ -178,7 +181,7 @@ export function SettingsPanel() {
             className="input"
             type="password"
             value={form.apiKey}
-            onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+            onChange={(e) => updateForm({ ...form, apiKey: e.target.value })}
             placeholder="sk-…"
           />
         </div>
@@ -187,7 +190,7 @@ export function SettingsPanel() {
           <input
             className="input"
             value={form.model}
-            onChange={(e) => setForm({ ...form, model: e.target.value })}
+            onChange={(e) => updateForm({ ...form, model: e.target.value })}
             placeholder="claude-sonnet-4-5-20250929"
           />
         </div>
@@ -196,7 +199,7 @@ export function SettingsPanel() {
           <input
             className="input"
             value={form.fastModel}
-            onChange={(e) => setForm({ ...form, fastModel: e.target.value })}
+            onChange={(e) => updateForm({ ...form, fastModel: e.target.value })}
             placeholder="claude-haiku-4-5-20251001"
           />
         </div>
@@ -236,7 +239,7 @@ export function SettingsPanel() {
                   type="checkbox"
                   checked={form.trigEnabled[id]}
                   onChange={(e) =>
-                    setForm({ ...form, trigEnabled: { ...form.trigEnabled, [id]: e.target.checked } })
+                    updateForm({ ...form, trigEnabled: { ...form.trigEnabled, [id]: e.target.checked } })
                   }
                 />
               </label>
@@ -252,7 +255,7 @@ export function SettingsPanel() {
             max="20"
             step="0.5"
             value={form.trigCooldownMin}
-            onChange={(e) => setForm({ ...form, trigCooldownMin: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigCooldownMin: Number(e.target.value) })}
           />
           <span className="set-hint">分钟 · 同一角色两次自动介入的最小间隔</span>
         </div>
@@ -265,7 +268,7 @@ export function SettingsPanel() {
             max="600"
             step="10"
             value={form.trigCalmSec}
-            onChange={(e) => setForm({ ...form, trigCalmSec: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigCalmSec: Number(e.target.value) })}
           />
           <span className="set-hint">秒 · 最近一次翻页/滚动后不打扰（这就是你的思考时间）</span>
         </div>
@@ -278,7 +281,7 @@ export function SettingsPanel() {
             min="0"
             step="10"
             value={form.trigClarifyDwellSec}
-            onChange={(e) => setForm({ ...form, trigClarifyDwellSec: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigClarifyDwellSec: Number(e.target.value) })}
           />
           <span className="set-hint">秒 且该页回读 ≥</span>
           <input
@@ -287,7 +290,7 @@ export function SettingsPanel() {
             min="0"
             max="20"
             value={form.trigClarifyPageReread}
-            onChange={(e) => setForm({ ...form, trigClarifyPageReread: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigClarifyPageReread: Number(e.target.value) })}
           />
           <span className="set-hint">次（或点「我困惑了」）</span>
         </div>
@@ -301,7 +304,7 @@ export function SettingsPanel() {
             max="10"
             step="0.5"
             value={form.trigChallengerMult}
-            onChange={(e) => setForm({ ...form, trigChallengerMult: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigChallengerMult: Number(e.target.value) })}
           />
           <span className="set-hint">倍（无基线时 &gt; </span>
           <input
@@ -310,7 +313,7 @@ export function SettingsPanel() {
             min="0"
             step="0.5"
             value={form.trigChallengerFallback}
-            onChange={(e) => setForm({ ...form, trigChallengerFallback: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigChallengerFallback: Number(e.target.value) })}
           />
           <span className="set-hint">页/分），窗口 ≥</span>
           <input
@@ -319,7 +322,7 @@ export function SettingsPanel() {
             min="1"
             max="20"
             value={form.trigChallengerWindowMin}
-            onChange={(e) => setForm({ ...form, trigChallengerWindowMin: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigChallengerWindowMin: Number(e.target.value) })}
           />
           <span className="set-hint">分钟且该页无回读</span>
         </div>
@@ -340,7 +343,7 @@ export function SettingsPanel() {
             min="0"
             step="10"
             value={form.trigExpanderDwellSec}
-            onChange={(e) => setForm({ ...form, trigExpanderDwellSec: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigExpanderDwellSec: Number(e.target.value) })}
           />
           <span className="set-hint">秒且中途无回读</span>
         </div>
@@ -353,7 +356,7 @@ export function SettingsPanel() {
             min="0"
             step="5"
             value={form.trigNudgeDwellSec}
-            onChange={(e) => setForm({ ...form, trigNudgeDwellSec: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigNudgeDwellSec: Number(e.target.value) })}
           />
           <span className="set-hint">秒弹出气泡，间隔 ≥</span>
           <input
@@ -362,7 +365,7 @@ export function SettingsPanel() {
             min="0"
             step="0.5"
             value={form.trigNudgeCooldownMin}
-            onChange={(e) => setForm({ ...form, trigNudgeCooldownMin: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, trigNudgeCooldownMin: Number(e.target.value) })}
           />
           <span className="set-hint">分钟</span>
         </div>
@@ -378,7 +381,7 @@ export function SettingsPanel() {
             max="2"
             step="0.1"
             value={form.sensitivity}
-            onChange={(e) => setForm({ ...form, sensitivity: Number(e.target.value) })}
+            onChange={(e) => updateForm({ ...form, sensitivity: Number(e.target.value) })}
           />
           <span className="set-val">{form.sensitivity.toFixed(1)}</span>
         </div>
@@ -387,7 +390,7 @@ export function SettingsPanel() {
           <input
             type="checkbox"
             checked={form.mouseProxy}
-            onChange={(e) => setForm({ ...form, mouseProxy: e.target.checked })}
+            onChange={(e) => updateForm({ ...form, mouseProxy: e.target.checked })}
           />
         </div>
         <p className="set-note">眼动数据全部在本机处理，不上传云端。摄像头权限在阅读器首次启动时请求。</p>

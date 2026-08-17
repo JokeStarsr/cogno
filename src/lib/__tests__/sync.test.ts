@@ -28,7 +28,7 @@ function mockClient(opts: { failUpsert?: boolean; failInsert?: boolean; haveSess
       return {
         ...base,
         select: vi.fn(() => ({
-          gte: vi.fn((val: string) => {
+          gte: vi.fn((_col: string, val: string) => {
             calls.push({ method: 'gte', arg: val })
             return {
               order: vi.fn(async () => ({ data: opts.remoteLogs ?? [], error: null })),
