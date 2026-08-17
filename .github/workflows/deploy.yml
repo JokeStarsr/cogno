@@ -41,43 +41,7 @@ jobs:
           npm --version
 
       - name: Install
-        run: npm ci 2>&1 | tee /tmp/npm-ci.log; test ${PIPESTATUS[0]} -eq 0
-
-      - name: Collect diagnostics (temporary)
-        if: failure()
-        run: |
-          set +e
-          {
-            echo "# CI 诊断 run $GITHUB_RUN_NUMBER ($GITHUB_REF)"
-            echo "NPM: $(npm --version) / NODE: $(node --version)"
-            echo "KEY_STATUS: $(test -s /tmp/cogno_deploy_key && echo ok || echo missing)"
-            echo ""
-            echo "## npm ci 日志(尾 60 行)"
-            echo '```'
-            tail -60 /tmp/npm-ci.log 2>/dev/null || echo "(无 npm-ci.log)"
-            echo '```'
-            echo "## 部署密钥认证测试"
-            echo '```'
-            ssh -i /tmp/cogno_deploy_key -o BatchMode=yes -o StrictHostKeyChecking=no \
-              root@115.159.221.62 'echo AUTH_OK' 2>&1 | tail -8
-            echo "auth-exit: ${PIPESTATUS[0]}"
-            echo '```'
-          } > /tmp/diag-body.txt 2>&1
-
-      - name: Publish diagnostics as issue (temporary)
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('/tmp/diag-body.txt', 'utf8').slice(0, 55000);
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `CI 诊断 run ${process.env.GITHUB_RUN_NUMBER}`,
-              body,
-            });
-            core.setFailed('diagnostic-only run');
+        run: npm ci
 
       - name: Test
         run: npm run test 2>/dev/null || npx vitest run
