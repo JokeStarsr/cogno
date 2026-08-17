@@ -38,12 +38,30 @@ jobs:
 
       - name: Upload npm ci failure log (diagnostic)
         if: failure()
+        env:
+          GHA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "NPM_SEMVER: $(npm --version), NODE: $(node --version)" >> /tmp/npm-ci.log
-          echo "KEY_STATUS: $(test -s /tmp/cogno_deploy_key && echo ok || echo missing)" >> /tmp/npm-ci.log
-          head -5 /tmp/npm-ci.log 2>/dev/null || true
-          scp -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no \
-            /tmp/npm-ci.log root@115.159.221.62:/tmp/ci-npm.log 2>/dev/null || true
+          {
+            echo "# CI 诊断 run $GITHUB_RUN_NUMBER ($GITHUB_REF)"
+            echo "NPM: $(npm --version) / NODE: $(node --version)"
+            echo "KEY_STATUS: $(test -s /tmp/cogno_deploy_key && echo ok || echo missing)"
+            echo ""
+            echo "## npm ci 日志(尾 60 行)"
+            echo '```'
+            tail -60 /tmp/npm-ci.log 2>/dev/null || echo "(无 npm-ci.log)"
+            echo '```'
+            echo "## scp -vvv 诊断(尾 25 行)"
+            echo '```'
+            scp -i /tmp/cogno_deploy_key -o StrictHostKeyChecking=no -vvv \
+              /tmp/npm-ci.log root@115.159.221.62:/tmp/ci-npm.log 2>&1 | tail -25
+            echo '```'
+          } > /tmp/diag-body.txt 2>&1
+          jq -R --slurp --arg title "CI 诊断 run $GITHUB_RUN_NUMBER" \
+            '{"title":$title,"body":.}' /tmp/diag-body.txt > /tmp/diag.json
+          curl -fsS -X POST -H "Authorization: token $GHA_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/JokeStarsr/cogno/issues \
+            -d @/tmp/diag.json || true
           false
 
       - name: Test
