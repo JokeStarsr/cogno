@@ -18,10 +18,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      # node 20 自带 npm 10：对 lock 中跨平台 optional 二进制（@esbuild/* 等）硬失败
+      # EBADPLATFORM / Missing from lock file（npm 11 起才正确跳过非当前平台包）
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install
