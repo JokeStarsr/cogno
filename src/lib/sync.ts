@@ -229,12 +229,18 @@ export class SyncEngine {
     }
 
     try {
-      // 最近 7 天聚合日志
-      const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString()
+      // 增量拉取：只取"晚于本地最新样本"且不早于 7 天窗口的日志
+      // （旧实现每次全量拉 7 天，与高频 auth 事件叠加会造成持续大请求）
+      let sinceIso = new Date(Date.now() - 7 * 86400_000).toISOString()
+      const maxLocal = await this.db.cognitiveLogs.orderBy('ts').last()
+      if (maxLocal) {
+        const afterIso = new Date(maxLocal.ts + 1).toISOString()
+        if (afterIso > sinceIso) sinceIso = afterIso
+      }
       const { data: remoteLogs } = await this.client
         .from('cognitive_logs')
         .select('understanding, attention, fatigue, divergence, flow, ts')
-        .gte('ts', cutoff)
+        .gte('ts', sinceIso)
         .order('ts', { ascending: true })
 
       if (Array.isArray(remoteLogs)) {

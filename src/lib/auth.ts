@@ -74,11 +74,13 @@ export async function getSession(): Promise<User | null> {
   return data.session?.user ?? null
 }
 
-/** 登录状态变更订阅；返回取消函数（组件卸载时调用） */
-export function onAuthStateChange(cb: (user: User | null) => void): () => void {
+/** 登录状态变更订阅；返回取消函数（组件卸载时调用）
+ *  event 为 Supabase AuthChangeEvent：INITIAL_SESSION/SIGNED_IN/SIGNED_OUT/TOKEN_REFRESHED 等，
+ *  高频的 TOKEN_REFRESHED 不应触发全量同步（消费方用 user 变化判断） */
+export function onAuthStateChange(cb: (user: User | null, event: string) => void): () => void {
   if (!supabase) return () => {}
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-    cb(session?.user ?? null)
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    cb(session?.user ?? null, event)
   })
   return () => data.subscription.unsubscribe()
 }

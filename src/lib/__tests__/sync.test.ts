@@ -28,9 +28,12 @@ function mockClient(opts: { failUpsert?: boolean; failInsert?: boolean; haveSess
       return {
         ...base,
         select: vi.fn(() => ({
-          gte: vi.fn(() => ({
-            order: vi.fn(async () => ({ data: opts.remoteLogs ?? [], error: null })),
-          })),
+          gte: vi.fn((val: string) => {
+            calls.push({ method: 'gte', arg: val })
+            return {
+              order: vi.fn(async () => ({ data: opts.remoteLogs ?? [], error: null })),
+            }
+          }),
         })),
       }
     }
@@ -173,5 +176,20 @@ describe('SyncEngine pullUserData', () => {
     expect(r.logs).toBe(2)
     const count = await db.cognitiveLogs.count()
     expect(count).toBe(2)
+  })
+
+  it('增量拉取：本地已有日志时 gte 参数推进到本地最新样本之后', async () => {
+    // 本地先有一条较新的样本
+    const localTs = 1_800_000_000_000 // 2027-01-01
+    await db.cognitiveLogs.add({
+      understanding: 50, attention: 55, fatigue: 15, divergence: 25, flow: false, ts: localTs,
+    })
+    const { client, calls } = mockClient({ remoteLogs: [] })
+    const s = new SyncEngine(client as never, db)
+    await s.pullUserData()
+    const gte = calls.find((c) => c.method === 'gte')
+    expect(gte).toBeTruthy()
+    // gte 应晚于本地最新样本（增量），而不是 7 天前的全量起点
+    expect(Date.parse(String(gte!.arg))).toBeGreaterThanOrEqual(localTs + 1)
   })
 })

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { db, setSetting } from '../lib/storage'
 import { DEFAULT_TRIGGER_CONFIG } from '../lib/agents'
 import { onAuthStateChange, signOut } from '../lib/auth'
@@ -57,20 +57,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [view, setView] = useState<ViewId>('dashboard')
   const [resumeDocId, setResumeDocId] = useState<number | null>(null)
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUserState] = useState<User | null>(null)
   const [authOpen, setAuthOpen] = useState(false)
   const [syncStatus, setSyncStatus] = useState<'off' | 'idle' | 'syncing' | 'error'>('off')
 
+  // user 双写（ref 供稳定回调读取，state 只驱动 UI）：
+  // 关键——之前 syncNow 依赖 user、订阅 effect 依赖 syncNow，而 Supabase 每分钟
+  // 的 TOKEN_REFRESHED 事件都会让 user 引用变化 → effect 重挂 → 重新订阅又触发
+  // 事件 → 循环风暴，每次循环全量拉取云端（用户看到的持续 GET cognitive_logs + 资源耗尽）
+  const userRef = useRef<User | null>(null)
+  const setUser = useCallback((u: User | null) => {
+    userRef.current = u
+    setUserState(u)
+  }, [])
+  /** 全量拉取节流：登录/手动触发 60s 内不重复（增量由 pullUserData 的 maxTs 保证） */
+  const lastPullAt = useRef(0)
+
   // ── 云端账号与会话（Phase 1.2/1.3）：登录后自动拉取云端数据并推送本地队列 ──
+  // syncNow 不依赖 user/订阅状态，保持引用稳定——只订阅一次，杜绝重订阅循环
   const syncNow = useCallback(async () => {
     if (!syncEngine.isReady()) {
       setSyncStatus('off')
       return
     }
-    if (!user) {
+    if (!userRef.current) {
       setSyncStatus('idle')
       return
     }
+    // 60s 节流：TOKEN_REFRESHED 等高频事件不会反复触发全量拉取
+    if (Date.now() - lastPullAt.current < 60_000) return
+    lastPullAt.current = Date.now()
     setSyncStatus('syncing')
     try {
       await syncEngine.pullUserData()
@@ -79,7 +95,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch {
       setSyncStatus('error')
     }
-  }, [user])
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -90,18 +106,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (alive) setSyncStatus('off')
         return
       }
+      // 只订阅一次；Supabase 每分钟有 TOKEN_REFRESHED 事件，
+      // 仅在"未登录→登录"的转变时做全量拉取（其余保持 idle，增量由 pullUserData 处理）
       const unsub = onAuthStateChange((u) => {
+        const prev = userRef.current
         setUser(u)
-        setSyncStatus(u ? 'idle' : 'idle')
-        // 首次登录：拉取云端学习数据 → 推送本地积累的队列
-        if (u) void syncNow()
+        if (u && !prev) {
+          // 未登录 → 登录（或页面加载会话恢复）：拉取云端 + 推送本地队列
+          void syncNow()
+        }
       })
       return () => {
         alive = false
         unsub()
       }
     })()
-  }, [syncNow])
+  }, [syncNow, setUser])
 
   // 定时兜底同步：登录状态下每 90s 尝试推一次队列（网络恢复/失败重试）
   useEffect(() => {
