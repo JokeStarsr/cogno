@@ -99,9 +99,15 @@ export const PdfViewer = memo(
     /** 可视缓冲范围 [start, end]（仅这些页渲染） */
     const [range, setRange] = useState<[number, number]>([0, CHUNK])
     /** 整本缺文本层（扫描件）时的 OCR 进度；idle = 未开始 */
-    const [ocr, setOcr] = useState<{ running: boolean; done: number; total: number; pageProgress: number; error: string }>(
-      { running: false, done: 0, total: 0, pageProgress: 0, error: '' }
-    )
+    const [ocr, setOcr] = useState<{
+      running: boolean
+      done: number
+      total: number
+      pageProgress: number
+      error: string
+      /** 识别完成后仍未出文字的页数（排版/清晰度原因），供完成提示 */
+      remainingEmpty: number
+    }>({ running: false, done: 0, total: 0, pageProgress: 0, error: '', remainingEmpty: 0 })
     const pageTextsRef = useRef<string[]>([])
     const lastPageRef = useRef(-1)
     /** OCR 回填的页文本（与抽取文本合并后的全量数组） */
@@ -175,9 +181,11 @@ export const PdfViewer = memo(
         const currentIdx = getCurrentPage()
         missing.sort((a, b) => Math.abs(a - currentIdx) - Math.abs(b - currentIdx))
         const token = ++ocrTokenRef.current
-        setOcr({ running: true, done: 0, total: missing.length, pageProgress: 0, error: '' })
+        setOcr({ running: true, done: 0, total: missing.length, pageProgress: 0, error: '', remainingEmpty: 0 })
         void (async () => {
           let done = 0
+          /** 连续识别为空的页（模型对特殊版式会整页白给），连续 3 页即暂停，不空转 */
+          let emptyStreak = 0
           for (const idx of missing) {
             if (ocrTokenRef.current !== token) return
             try {
@@ -193,6 +201,21 @@ export const PdfViewer = memo(
               ocrSessionCacheRef.current = next
               // 逐页回填：概念扫描与代理解说立刻能看到新识别内容
               onTextReady?.(next)
+              if (!text) {
+                emptyStreak++
+                done++
+                setOcr((o) => ({ ...o, done, pageProgress: 0 }))
+                if (emptyStreak >= 3) {
+                  setOcr((o) => ({
+                    ...o,
+                    running: false,
+                    error: `连续 ${emptyStreak} 页识别结果为空（书页排版或清晰度原因），已暂停。`,
+                  }))
+                  return
+                }
+                continue
+              }
+              emptyStreak = 0
               done++
               setOcr((o) => ({ ...o, done, pageProgress: 0 }))
             } catch (e) {
@@ -205,10 +228,12 @@ export const PdfViewer = memo(
               return
             }
           }
-          setOcr((o) => ({ ...o, running: false }))
+          // 自然完成：统计仍未识别的页数，供完成提示使用
+          const remainingEmpty = pages.filter((t, i) => !t && missing.includes(i)).length
+          setOcr((o) => ({ ...o, running: false, remainingEmpty }))
         })()
       },
-      [onTextReady]
+      [getCurrentPage, onTextReady]
     )
 
     // 加载文档（幂等，重载时先摧毁旧文档）
@@ -216,7 +241,7 @@ export const PdfViewer = memo(
       let alive = true
       let task: ReturnType<typeof pdfjsLib.getDocument> | null = null
       setState({ loading: true, error: '', pages: 0 })
-      setOcr({ running: false, done: 0, total: 0, pageProgress: 0, error: '' })
+      setOcr({ running: false, done: 0, total: 0, pageProgress: 0, error: '', remainingEmpty: 0 })
       setPageProxies([])
       setRange([0, CHUNK])
       ocrTokenRef.current++ // 中断上一份文档的 OCR 循环
@@ -356,7 +381,7 @@ export const PdfViewer = memo(
                   : '准备 OCR…'}
               </span>
               <span className="ocr-sub">
-                首次识别需加载中英文模型（约 13MB），识别结果自动保存，下次打开即时可用
+                首次识别需加载中英文模型（约 24MB，同源加载），识别结果自动保存，下次打开即时可用
               </span>
               <button
                 className="btn-ghost"
@@ -371,7 +396,12 @@ export const PdfViewer = memo(
           )}
           {ocr.error && !ocr.running && (
             <div className="pdf-hint error">
-              扫描件 OCR 不可用：{ocr.error}。可换文字版 PDF，或复制正文粘贴到文本模式。
+              扫描件 OCR 已暂停：{ocr.error}。可换文字版 PDF，或复制正文粘贴到文本模式。
+            </div>
+          )}
+          {!ocr.running && !ocr.error && ocr.remainingEmpty > 0 && (
+            <div className="pdf-hint warn">
+              全书识别完成，仍有 {ocr.remainingEmpty} 页未能识别出文字（书页排版或清晰度原因）。
             </div>
           )}
           {pageProxies.map((p, i) => (

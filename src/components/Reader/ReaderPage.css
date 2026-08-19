@@ -295,6 +295,9 @@
 .pdf-hint.error {
   color: var(--agent-challenger);
 }
+.pdf-hint.warn {
+  color: #ffd700;
+}
 /* 扫描件 OCR 进度横幅 */
 .pdf-hint.ocr {
   display: flex;
