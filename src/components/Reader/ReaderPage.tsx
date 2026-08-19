@@ -242,16 +242,16 @@ export function ReaderPage() {
     return textHandle.current?.visibleText().slice(-600) ?? ''
   }
 
-  /** 组装阅读片段块：有文本时给上下文；没有时明确告知状态，避免 AI 回复"粘贴漏了"误导 */
+  /** 组装阅读片段块：只有拿到正文时才拼接上下文；无正文绝不把"指令说明"喂给 AI */
   const buildContextBlock = (ctx: string): string => {
     const trimmed = trimContext(ctx)
     if (trimmed) return `阅读片段（当前页附近已识别的文字）：\n${trimmed}`
-    return (
-      '【系统说明】当前 PDF 页面附近还没有可用的已识别文本（文本层抽取或 OCR 识别进行中，' +
-      '或该页为空白页/纯图片页）。请基于你已有的理解和常识作答；回答末尾用一句话提示用户' +
-      '稍等片刻让识别完成，再重试对话。'
-    )
+    return ''
   }
+
+  /** PDF 页识别未就绪时的即时话术（不进 LLM，避免 AI 对"系统说明"空转/复述） */
+  const OCR_PENDING_HINT =
+    '这一页的文字还在识别中，我暂时看不到你读的内容。稍等片刻，或翻回已识别的页再点一次，我就能结合正文帮你了。'
 
   const autoIntervene = async (
     agentId: AgentId,
@@ -259,9 +259,20 @@ export function ReaderPage() {
     reason: string,
     cfg: { baseUrl: string; apiKey: string; model: string }
   ) => {
+    const ctxBlock = buildContextBlock(ctx)
+    // 阅读片段缺失（PDF 识别中/空白页）且本地概念也没命中：直接给即时话术，
+    // 不让 AI 在没有材料时空转或复述系统说明
+    const localHit = ctxBlock ? localAgentReply(agentId, ctxBlock.slice(0, 400)) : null
+    if (!ctxBlock && !localHit) {
+      setTurns((t) => [
+        ...t,
+        { agentId, role: 'agent', content: OCR_PENDING_HINT, reason, local: true, ts: Date.now() },
+      ])
+      return
+    }
     if (!isLLMConfigured(cfg)) {
       // 未配置端点：先试本地苏格拉底（用阅读片段匹配概念，命中即可离线答疑）
-      const local = localAgentReply(agentId, ctx.slice(0, 400) || '请帮我理解刚刚读到的内容')
+      const local = localHit ?? localAgentReply(agentId, '请帮我理解刚刚读到的内容')
       setTurns((t) => [
         ...t,
         {
@@ -278,7 +289,7 @@ export function ReaderPage() {
       // 自动介入的消息里带上具体阅读片段，让 AI 拿到上下文（本地兜底已直接回答时不再追加）
       if (!local) return
     }
-    const prompt = `我刚刚在阅读下面这段内容，系统判断我可能需要帮助（原因：${reason}）。请以你的角色介入。\n\n${buildContextBlock(ctx)}`
+    const prompt = `我刚刚在阅读下面这段内容，系统判断我可能需要帮助（原因：${reason}）。请以你的角色介入。\n\n${ctxBlock}`
     await doAgentCall(agentId, prompt, reason)
   }
 
@@ -299,7 +310,9 @@ export function ReaderPage() {
     const cfg = settingsRef.current.llm
     const content = context?.trim()
       ? `我刚刚在阅读下面这段内容，请结合它回答我的问题。\n\n${buildContextBlock(context)}\n\n我的问题：${userText}`
-      : userText
+      : `当前没有附带的阅读文本（PDF 页面文字识别中或空白页，用户可能在问通用问题）。用户的问题：${userText}\n` +
+        '请直接回答这个问题本身，不要编造任何页面内容；若确实需要正文才能深入，说明原因，' +
+        '并提示等页面文字识别完成后重试。'
     setTurns((t) => [...t, { agentId, role: 'user', content: userText, ts: Date.now() }])
     // 本地兜底：命中知识图谱概念时，本地苏格拉底话术可离线作答（token 用尽也能续上对话）
     const local = localAgentReply(agentId, userText)
