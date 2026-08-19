@@ -1,7 +1,8 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { renderPageToCanvas, recognizePage } from '../../lib/ocr'
+import { renderPageToCanvas, recognizePage, recognizePageVision, VISION_MODEL } from '../../lib/ocr'
+import type { LLMConfig } from '../../types'
 import { nearbyNonEmptyText } from '../../lib/pdfText'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
@@ -23,6 +24,8 @@ interface Props {
   initialPage?: number
   /** 续读恢复：已保存的逐页文本（含上次 OCR 结果），跳过重复识别 */
   initialTexts?: string[]
+  /** 已配置的 AI 端点（有值时扫描件 OCR 优先走 qwen 视觉模型，失败自动降级本地 tesseract） */
+  visionCfg?: LLMConfig | null
 }
 
 /** 视口外缓冲页数：渲染范围 = 当前页 ±CHUNK */
@@ -84,7 +87,7 @@ function PdfPage({ page, scale, visible }: { page: pdfjsLib.PDFPageProxy; scale:
 
 export const PdfViewer = memo(
   forwardRef<PdfHandle, Props>(function PdfViewer(
-    { file, onScroll, onTextReady, onPageChange, initialPage = 0, initialTexts },
+    { file, onScroll, onTextReady, onPageChange, initialPage = 0, initialTexts, visionCfg },
     ref
   ) {
     const scrollRef = useRef<HTMLDivElement>(null)
@@ -107,13 +110,17 @@ export const PdfViewer = memo(
       error: string
       /** 识别完成后仍未出文字的页数（排版/清晰度原因），供完成提示 */
       remainingEmpty: number
-    }>({ running: false, done: 0, total: 0, pageProgress: 0, error: '', remainingEmpty: 0 })
+      /** 当前引擎：ai = qwen 视觉模型，local = tesseract（AI 失败自动降级） */
+      engine: 'ai' | 'local'
+    }>({ running: false, done: 0, total: 0, pageProgress: 0, error: '', remainingEmpty: 0, engine: 'local' })
     const pageTextsRef = useRef<string[]>([])
     const lastPageRef = useRef(-1)
     /** OCR 回填的页文本（与抽取文本合并后的全量数组） */
     const ocrSessionCacheRef = useRef<string[] | null>(null)
     /** OCR 循环取消令牌：换文件/卸载/跳过后 +1 使循环中止 */
     const ocrTokenRef = useRef(0)
+    /** 当前 OCR 引擎（ai 失败自动降级 local；ref 供循环内同步判断） */
+    const engineRef = useRef<'ai' | 'local'>('local')
     /** 页偏移缓存：滚动每秒触发数十次，读 offsetTop 会强制同步重排（layout thrashing）
      *  是 PDF 滚动卡顿的主因之一——页顶相对容器不变，按子元素数量失效即可 */
     const topsCacheRef = useRef<number[] | null>(null)
@@ -181,19 +188,47 @@ export const PdfViewer = memo(
         const currentIdx = getCurrentPage()
         missing.sort((a, b) => Math.abs(a - currentIdx) - Math.abs(b - currentIdx))
         const token = ++ocrTokenRef.current
-        setOcr({ running: true, done: 0, total: missing.length, pageProgress: 0, error: '', remainingEmpty: 0 })
+        engineRef.current = visionCfg ? 'ai' : 'local'
+        setOcr({
+          running: true,
+          done: 0,
+          total: missing.length,
+          pageProgress: 0,
+          error: '',
+          remainingEmpty: 0,
+          engine: engineRef.current,
+        })
         void (async () => {
           let done = 0
           /** 连续识别为空的页（模型对特殊版式会整页白给），连续 3 页即暂停，不空转 */
           let emptyStreak = 0
+          /** AI 视觉连续失败次数：≥2 即整体降级 tesseract，避免每页白跑一次视觉请求 */
+          let visionFails = 0
           for (const idx of missing) {
             if (ocrTokenRef.current !== token) return
             try {
               const p = await d.getPage(idx + 1)
               const canvas = await renderPageToCanvas(p, OCR_SCALE)
-              const text = await recognizePage(canvas, (prog) => {
+              const setProg = (prog: number) => {
                 if (ocrTokenRef.current === token) setOcr((o) => ({ ...o, pageProgress: prog }))
-              })
+              }
+              let text = ''
+              if (engineRef.current === 'ai' && visionCfg) {
+                try {
+                  text = await recognizePageVision(canvas, visionCfg, VISION_MODEL)
+                } catch (e) {
+                  visionFails++
+                  console.warn('AI 视觉识别第', idx + 1, '页失败，尝试本地识别', e)
+                  if (visionFails >= 2) {
+                    engineRef.current = 'local'
+                    setOcr((o) => ({ ...o, engine: 'local' }))
+                  }
+                }
+              }
+              if (!text) {
+                // AI 未配置/失败/空结果 → 本页退回 tesseract（每页渲染一次,双引擎共用）
+                text = await recognizePage(canvas, setProg)
+              }
               const next = [...pages]
               next[idx] = text
               pages = next
@@ -241,7 +276,15 @@ export const PdfViewer = memo(
       let alive = true
       let task: ReturnType<typeof pdfjsLib.getDocument> | null = null
       setState({ loading: true, error: '', pages: 0 })
-      setOcr({ running: false, done: 0, total: 0, pageProgress: 0, error: '', remainingEmpty: 0 })
+      setOcr({
+        running: false,
+        done: 0,
+        total: 0,
+        pageProgress: 0,
+        error: '',
+        remainingEmpty: 0,
+        engine: 'local',
+      })
       setPageProxies([])
       setRange([0, CHUNK])
       ocrTokenRef.current++ // 中断上一份文档的 OCR 循环
@@ -377,11 +420,15 @@ export const PdfViewer = memo(
             <div className="pdf-hint ocr">
               <span>
                 {ocr.total > 0
-                  ? `扫描件 OCR 识别中：${ocr.done}/${ocr.total} 页完成，本页 ${Math.round(ocr.pageProgress * 100)}%`
+                  ? ocr.engine === 'ai'
+                    ? `扫描件 AI 视觉识别中：${ocr.done}/${ocr.total} 页完成，本页识别中`
+                    : `扫描件本地识别中：${ocr.done}/${ocr.total} 页完成，本页 ${Math.round(ocr.pageProgress * 100)}%`
                   : '准备 OCR…'}
               </span>
               <span className="ocr-sub">
-                首次识别需加载中英文模型（约 24MB，同源加载），识别结果自动保存，下次打开即时可用
+                {ocr.engine === 'ai'
+                  ? 'AI 视觉识别效果最佳，按页计费；结果自动保存，下次打开即时可用'
+                  : '本地 tesseract 识别（免费）；结果自动保存，下次打开即时可用'}
               </span>
               <button
                 className="btn-ghost"

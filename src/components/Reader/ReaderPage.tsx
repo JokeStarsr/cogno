@@ -649,6 +649,7 @@ export function ReaderPage() {
                   onPageChange={handlePdfPage}
                   initialPage={resumePosRef.current?.page ?? 0}
                   initialTexts={pdfInitialTexts}
+                  visionCfg={isLLMConfigured(settings.llm) ? settings.llm : null}
                 />
               ) : (
                 <TextViewer

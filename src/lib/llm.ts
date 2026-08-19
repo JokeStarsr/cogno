@@ -38,22 +38,10 @@ const RATE_HINTS = ['rate', 'tpm', 'rpm', '限流', 'too many request', 'frequen
  * 调用 Anthropic Messages API（兼容 sub2api / DeepSeek anthropic 端点）。
  * baseUrl 例如 http://localhost:8180 或 https://api.deepseek.com/anthropic
  */
-export async function chatCompletion(
-  cfg: LLMConfig,
-  system: string,
-  messages: ChatMessage[],
-  opts: ChatOptions = {}
-): Promise<string> {
+/** 请求 Anthropic Messages API 并抽取正文（text 块优先，thinking 兜底） */
+async function invokeMessages(cfg: LLMConfig, body: Record<string, unknown>): Promise<string> {
   const base = cfg.baseUrl.replace(/\/+$/, '')
   const url = `${base}/v1/messages`
-
-  const body: Record<string, unknown> = {
-    model: cfg.model || 'claude-sonnet-4-5-20250929',
-    // 思考型模型会把输出额度先花在 thinking 上，小额很容易被吃光导致正文为空
-    max_tokens: opts.maxTokens ?? 1024,
-    system,
-    messages,
-  }
 
   let res: Response
   try {
@@ -97,6 +85,62 @@ export async function chatCompletion(
   const final = text || thinking
   if (!final) throw new LLMError('empty', 'AI 返回为空（可能是思考模型 max_tokens 被 thinking 占满，请调大）')
   return final
+}
+
+export async function chatCompletion(
+  cfg: LLMConfig,
+  system: string,
+  messages: ChatMessage[],
+  opts: ChatOptions = {}
+): Promise<string> {
+  const body: Record<string, unknown> = {
+    model: cfg.model || 'claude-sonnet-4-5-20250929',
+    // 思考型模型会把输出额度先花在 thinking 上，小额很容易被吃光导致正文为空
+    max_tokens: opts.maxTokens ?? 1024,
+    system,
+    messages,
+  }
+  return invokeMessages(cfg, body)
+}
+
+export interface VisionCallOptions {
+  maxTokens?: number
+  /** 视觉模型名。默认 qwen3.7-plus（sub2api→阿里 token-plan 可视通道，见 docs） */
+  model?: string
+}
+
+/**
+ * 视觉识别调用：把图片（base64 data URL）与提示词发给支持图片的模型。
+ * 用于扫描件 PDF 的高质量 OCR——tesseract 中文书页效果差，qwen 视觉模型实测可整行识别。
+ */
+export async function chatCompletionVision(
+  cfg: LLMConfig,
+  prompt: string,
+  imageDataUrl: string,
+  opts: VisionCallOptions = {}
+): Promise<string> {
+  const media = /^data:(image\/[a-z+]+);base64,/.exec(imageDataUrl)
+  const body: Record<string, unknown> = {
+    model: opts.model || 'qwen3.7-plus',
+    max_tokens: opts.maxTokens ?? 1200,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: media ? media[1] : 'image/jpeg',
+              data: imageDataUrl.replace(/^data:[^,]+,/, ''),
+            },
+          },
+          { type: 'text', text: prompt },
+        ],
+      },
+    ],
+  }
+  return invokeMessages(cfg, body)
 }
 
 /** 依据状态码 + 错误文本分类失败原因，决定要不要重试、给用户什么提示 */

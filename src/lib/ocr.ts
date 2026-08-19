@@ -4,6 +4,8 @@
  * 库本体动态 import，OCR 首次触发才加载，不影响主包体积。
  */
 import type { PDFPageProxy } from 'pdfjs-dist/types/src/pdf'
+import { chatCompletionVision } from './llm'
+import type { LLMConfig } from '../types'
 
 const OCR_BASE = `${import.meta.env.BASE_URL}ocr/`
 /** 中文书籍为主，混合加载中英文 */
@@ -77,4 +79,46 @@ export async function recognizePage(
   } finally {
     progListener = null
   }
+}
+
+// ── AI 视觉识别（qwen3.7-plus 经 sub2api，中文书页识别效果远好于 tesseract）──
+
+/** 视觉模型名：sub2api(服务器)→阿里 token-plan 的 qwen3.7-plus 直通名（白名单外模型会 404/拒收） */
+export const VISION_MODEL = 'qwen3.7-plus'
+
+/** 识别提示词：要求只输出正文、保留段落、忽略页眉页脚页码 */
+export const VISION_PROMPT =
+  '这是一本书的扫描页图片。请完整识别图中全部正文文字，保留段落换行；不要页眉页脚和页码；只输出识别到的原文，不要任何解释或补充。'
+
+/** 视觉输入长边上限：超过则等比缩小（一页 1280 长边足以识别印刷体，且控制 token 成本） */
+export const VISION_CAP = 1280
+
+/** canvas → JPEG data URL（超过长边上限先等比缩小） */
+export async function canvasToJpegDataUrl(
+  canvas: HTMLCanvasElement,
+  cap = VISION_CAP
+): Promise<string> {
+  const long = Math.max(canvas.width, canvas.height)
+  if (long > cap) {
+    const scale = cap / long
+    const out = document.createElement('canvas')
+    out.width = Math.max(1, Math.round(canvas.width * scale))
+    out.height = Math.max(1, Math.round(canvas.height * scale))
+    const ctx = out.getContext('2d')
+    if (!ctx) throw new Error('无法创建 2D canvas，AI 视觉识别不可用')
+    ctx.drawImage(canvas, 0, 0, out.width, out.height)
+    return out.toDataURL('image/jpeg', 0.8)
+  }
+  return canvas.toDataURL('image/jpeg', 0.8)
+}
+
+/** 用视觉模型识别一页（失败抛 LLMError，由调用方决定降级 tesseract 或暂停） */
+export async function recognizePageVision(
+  canvas: HTMLCanvasElement,
+  cfg: LLMConfig,
+  model = VISION_MODEL
+): Promise<string> {
+  const dataUrl = await canvasToJpegDataUrl(canvas)
+  const text = await chatCompletionVision(cfg, VISION_PROMPT, dataUrl, { model })
+  return text.trim()
 }
