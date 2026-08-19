@@ -2,6 +2,7 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, 
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { renderPageToCanvas, recognizePage } from '../../lib/ocr'
+import { nearbyNonEmptyText } from '../../lib/pdfText'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
 
@@ -111,14 +112,17 @@ export const PdfViewer = memo(
      *  是 PDF 滚动卡顿的主因之一——页顶相对容器不变，按子元素数量失效即可 */
     const topsCacheRef = useRef<number[] | null>(null)
 
-    // 各页相对滚动容器顶部的偏移（依赖 .pdf-page-wrap 的 minHeight）
+    // 各页相对滚动容器顶部的偏移（依赖 .pdf-page-wrap 的 minHeight）。
+    // 只统计页 wrapper：加载提示/OCR 进度这些 .pdf-hint 也是容器子元素，
+    // 混入会让页定位整体错位（此前 OCR 进行中"看不到正文"的根因之一）
     const getPageTops = useCallback((): number[] => {
       const sc = scrollRef.current
       if (!sc) return []
-      const n = sc.children.length
+      const wraps = Array.from(sc.querySelectorAll('.pdf-page-wrap'))
+      const n = wraps.length
       const cached = topsCacheRef.current
       if (cached && cached.length === n) return cached
-      const tops = Array.from(sc.children).map((el) => (el as HTMLElement).offsetTop)
+      const tops = wraps.map((el) => (el as HTMLElement).offsetTop)
       topsCacheRef.current = tops
       return tops
     }, [])
@@ -136,15 +140,11 @@ export const PdfViewer = memo(
       return idx
     }, [getPageTops])
 
+    /** 当前页附近「已识别」的正文（抽取未完成/OCR 排队时自动回退到最近非空页） */
     const getVisibleText = useCallback((): string => {
       const t = pageTextsRef.current
-      if (!t.length) return ''
-      let idx = getCurrentPage()
-      if (idx >= t.length) idx = t.length - 1
-      return [t[idx - 1] ?? '', t[idx] ?? '', t[idx + 1] ?? '']
-        .filter(Boolean)
-        .join('\n')
-        .trim()
+      const near = nearbyNonEmptyText(t, getCurrentPage(), 3)
+      return near?.text ?? ''
     }, [getCurrentPage])
 
     useImperativeHandle(ref, () => ({ getVisibleText, getCurrentPage }), [getVisibleText, getCurrentPage])
@@ -171,6 +171,9 @@ export const PdfViewer = memo(
         const missing: number[] = []
         for (let i = 0; i < pages.length; i++) if (!pages[i]) missing.push(i)
         if (!missing.length) return
+        // 读者附近的页优先识别：OCR 排队时先出"当前正在读的内容"，再补全书
+        const currentIdx = getCurrentPage()
+        missing.sort((a, b) => Math.abs(a - currentIdx) - Math.abs(b - currentIdx))
         const token = ++ocrTokenRef.current
         setOcr({ running: true, done: 0, total: missing.length, pageProgress: 0, error: '' })
         void (async () => {
@@ -217,10 +220,11 @@ export const PdfViewer = memo(
       setPageProxies([])
       setRange([0, CHUNK])
       ocrTokenRef.current++ // 中断上一份文档的 OCR 循环
-      // 续读恢复：先用已保存文本（含上次 OCR 结果）填充，新抽取/OCR 只补缺页
+      // 续读恢复：先用已保存文本（含上次 OCR 结果）填充，新抽取/OCR 只补缺页。
+      // 立即生效：加载与抽取完成前，代理上下文也能立刻读到已存正文
       const seeded: string[] = initialTexts?.length ? [...initialTexts] : []
-      pageTextsRef.current = []
-      ocrSessionCacheRef.current = null
+      pageTextsRef.current = seeded
+      ocrSessionCacheRef.current = seeded.length ? seeded : null
       lastPageRef.current = -1
       const load = async () => {
         try {

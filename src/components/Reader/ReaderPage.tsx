@@ -242,6 +242,17 @@ export function ReaderPage() {
     return textHandle.current?.visibleText().slice(-600) ?? ''
   }
 
+  /** 组装阅读片段块：有文本时给上下文；没有时明确告知状态，避免 AI 回复"粘贴漏了"误导 */
+  const buildContextBlock = (ctx: string): string => {
+    const trimmed = trimContext(ctx)
+    if (trimmed) return `阅读片段（当前页附近已识别的文字）：\n${trimmed}`
+    return (
+      '【系统说明】当前 PDF 页面附近还没有可用的已识别文本（文本层抽取或 OCR 识别进行中，' +
+      '或该页为空白页/纯图片页）。请基于你已有的理解和常识作答；回答末尾用一句话提示用户' +
+      '稍等片刻让识别完成，再重试对话。'
+    )
+  }
+
   const autoIntervene = async (
     agentId: AgentId,
     ctx: string,
@@ -267,7 +278,7 @@ export function ReaderPage() {
       // 自动介入的消息里带上具体阅读片段，让 AI 拿到上下文（本地兜底已直接回答时不再追加）
       if (!local) return
     }
-    const prompt = `我刚刚在阅读下面这段内容，系统判断我可能需要帮助（原因：${reason}）。请以你的角色介入。\n\n阅读片段：\n${trimContext(ctx)}`
+    const prompt = `我刚刚在阅读下面这段内容，系统判断我可能需要帮助（原因：${reason}）。请以你的角色介入。\n\n${buildContextBlock(ctx)}`
     await doAgentCall(agentId, prompt, reason)
   }
 
@@ -286,8 +297,8 @@ export function ReaderPage() {
 
   const doAgentCall = async (agentId: AgentId, userText: string, reason?: string, context?: string) => {
     const cfg = settingsRef.current.llm
-    const content = context
-      ? `我刚刚在阅读下面这段内容，请结合它回答我的问题。\n\n阅读片段：\n${trimContext(context)}\n\n我的问题：${userText}`
+    const content = context?.trim()
+      ? `我刚刚在阅读下面这段内容，请结合它回答我的问题。\n\n${buildContextBlock(context)}\n\n我的问题：${userText}`
       : userText
     setTurns((t) => [...t, { agentId, role: 'user', content: userText, ts: Date.now() }])
     // 本地兜底：命中知识图谱概念时，本地苏格拉底话术可离线作答（token 用尽也能续上对话）
