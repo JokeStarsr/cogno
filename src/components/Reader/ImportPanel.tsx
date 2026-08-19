@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { SAMPLE_TEXT } from '../../data/sampleText'
+import { extractDocxText } from '../../lib/docx'
 
 export interface ReaderSource {
   title: string
@@ -18,6 +19,7 @@ export function ImportPanel({ onLoad, onClose }: Props) {
   const [url, setUrl] = useState('')
   const [text, setText] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [extracting, setExtracting] = useState(false)
   const [fetchingUrl, setFetchingUrl] = useState(false)
   const [urlError, setUrlError] = useState('')
 
@@ -49,10 +51,25 @@ export function ImportPanel({ onLoad, onClose }: Props) {
     }
   }
 
-  const load = () => {
+  const load = async () => {
     if (tab === 'sample') {
       onLoad({ title: '数据结构与算法导论', sourceType: 'sample', text: SAMPLE_TEXT })
     } else if (tab === 'pdf' && file) {
+      if (/\.docx$/i.test(file.name)) {
+        // Word：浏览器端提取纯文本，走文本阅读管线（滚动/代理/续读全可用）
+        setExtracting(true)
+        try {
+          const text = await extractDocxText(file)
+          onLoad({ title: file.name.replace(/\.docx$/i, ''), sourceType: 'text', text })
+          onClose()
+          return
+        } catch (e) {
+          console.error('docx 提取失败', e)
+          alert(`Word 文档解析失败：${e instanceof Error ? e.message : String(e)}`)
+          setExtracting(false)
+          return
+        }
+      }
       onLoad({ title: file.name, sourceType: 'pdf', file })
     } else if (tab === 'url') {
       void loadUrl()
@@ -70,7 +87,7 @@ export function ImportPanel({ onLoad, onClose }: Props) {
           {(['sample', 'pdf', 'url', 'text'] as const).map((t) => (
             <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
               {t === 'sample' && '示例文章'}
-              {t === 'pdf' && '上传 PDF'}
+              {t === 'pdf' && '上传文档'}
               {t === 'url' && '粘贴网页'}
               {t === 'text' && '粘贴文本'}
             </button>
@@ -82,14 +99,19 @@ export function ImportPanel({ onLoad, onClose }: Props) {
             <p className="import-hint">加载内置示例：《数据结构与算法导论》，用于演示眼动追踪与代理介入。</p>
           )}
           {tab === 'pdf' && (
-            <label className="import-file">
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-              {file ? `已选择：${file.name}` : '点击选择 PDF 文件'}
-            </label>
+            <>
+              <label className="import-file">
+                <input
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+                {file ? `已选择：${file.name}` : '点击选择 PDF / Word 文档'}
+              </label>
+              <p className="import-hint">
+                PDF 保留排版（扫描件自动 OCR）；Word(.docx) 自动提取文字——扫描 PDF 建议先用 Word/WPS 转成 Word 再上传，识别效果更好
+              </p>
+            </>
           )}
           {tab === 'url' && (
             <div className="import-url">
@@ -117,8 +139,12 @@ export function ImportPanel({ onLoad, onClose }: Props) {
           <button className="btn-ghost" onClick={onClose}>
             取消
           </button>
-          <button className="btn-primary" onClick={load} disabled={tab === 'pdf' && !file}>
-            开始阅读
+          <button
+            className="btn-primary"
+            onClick={() => void load()}
+            disabled={(tab === 'pdf' && !file) || extracting}
+          >
+            {extracting ? '正在提取…' : '开始阅读'}
           </button>
         </div>
       </div>
